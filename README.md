@@ -1,5 +1,7 @@
 # AegisScan SDK
 
+[![CodeQL](https://github.com/deadislove/aegis_scan/actions/workflows/codeql.yml/badge.svg)](https://github.com/deadislove/aegis_scan/actions/workflows/codeql.yml)
+
 Zero-disk, low-latency payment-card and voucher scanner for iOS, Android, Web,
 .NET 8, and Java 21+.
 
