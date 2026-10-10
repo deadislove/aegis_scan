@@ -1,0 +1,6 @@
+// Exposes only the stable C ABI to Swift. The C++ header stays private so
+// Swift never needs C++ interop mode.
+module CAegisCore {
+  header "aegisscan/fintech_core_c.h"
+  export *
+}

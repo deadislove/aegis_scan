@@ -1,0 +1,28 @@
+.build/
+core/build/
+web/node_modules/
+web/dist/
+web/dist-test/
+bindings/dotnet/**/bin/
+bindings/dotnet/**/obj/
+android/.gradle/
+android/**/build/
+*.class
+.DS_Store
+
+## sample/ build artifacts
+sample/csharp/**/bin/
+sample/csharp/**/obj/
+sample/java/out/
+sample/web/node_modules/
+sample/ios/**/.build/
+sample/macos/**/.build/
+sample/android/build/
+
+## Stray captures from manually testing imagesnap/the --camera samples
+## (imagesnap's own default filename when none is given on the command line)
+snapshot.jpg
+sample/**/snapshot.jpg
+
+## Other
+spec/

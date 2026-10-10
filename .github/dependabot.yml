@@ -1,0 +1,34 @@
+version: 2
+updates:
+  # Web SDK
+  - package-ecosystem: "npm"
+    directory: "/web"
+    schedule:
+      interval: "weekly"
+    groups:
+      dev-dependencies:
+        dependency-type: "development"
+
+  # Web sample (Tesseract.js)
+  - package-ecosystem: "npm"
+    directory: "/sample/web"
+    schedule:
+      interval: "weekly"
+
+  # .NET bindings
+  - package-ecosystem: "nuget"
+    directory: "/bindings/dotnet"
+    schedule:
+      interval: "weekly"
+
+  # Android (Gradle / CameraX / ML Kit)
+  - package-ecosystem: "gradle"
+    directory: "/android"
+    schedule:
+      interval: "weekly"
+
+  # GitHub Actions workflows themselves
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

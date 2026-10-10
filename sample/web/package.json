@@ -1,0 +1,8 @@
+{
+  "name": "aegisscan-web-sample",
+  "private": true,
+  "description": "AegisScan web sample. Run `npm install` once to pull in Tesseract.js for card OCR, then `node serve.mjs` -- see README.md.",
+  "dependencies": {
+    "tesseract.js": "^7.0.0"
+  }
+}

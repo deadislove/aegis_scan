@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>AegisScan Web Sample</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
+  video { width: 100%; max-width: 480px; background: #000; border-radius: 8px; }
+  button { font-size: 1rem; padding: 0.5rem 1.2rem; margin-right: 0.5rem; }
+  pre { background: #111; color: #0f0; padding: 1rem; border-radius: 8px; height: 220px; overflow-y: auto; }
+  .card { background: #f4f4f4; border-radius: 8px; padding: 1rem; margin-top: 1rem; }
+  code { background: #eee; padding: 0 0.3rem; border-radius: 4px; }
+</style>
+</head>
+<body>
+  <h1>AegisScan Web Sample</h1>
+  <p>
+    Minimal integration of <code>@aegisscan/web</code>
+    (<code>web/src/FintechWebScanner.ts</code>) — no bundler, no build step.
+    Requires a secure context, so <code>http://localhost</code> is fine but a
+    plain IP/hostname over HTTP is not.
+  </p>
+
+  <video id="video" autoplay muted playsinline></video>
+  <p>
+    <button id="startBtn">Start camera</button>
+    <button id="stopBtn" disabled>Stop</button>
+  </p>
+
+  <div class="card">
+    <strong>Last card:</strong> <span id="cardOut">(none yet)</span>
+  </div>
+  <div class="card">
+    <strong>Last vouchers:</strong> <span id="voucherOut">(none yet)</span>
+  </div>
+
+  <h3>Log</h3>
+  <pre id="log"></pre>
+
+  <script type="module" src="./main.js"></script>
+</body>
+</html>
