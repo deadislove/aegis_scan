@@ -26,3 +26,4 @@ sample/**/snapshot.jpg
 
 ## Other
 spec/
+.claude/
