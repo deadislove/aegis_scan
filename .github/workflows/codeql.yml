@@ -23,6 +23,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # java-kotlin here only builds bindings/java (plain javac) -- it does
+        # not cover android/, since that needs a full Android SDK + Gradle
+        # setup in CI. Add an `android/` build step here if that gets set up.
         include:
           - language: cpp
             os: ubuntu-latest

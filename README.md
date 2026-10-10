@@ -120,3 +120,12 @@ or `loadLibrary()` with the library on `java.library.path` or in `jniLibs/`.
   (Vision, ML Kit) handle this better than the plain-Tesseract paths used in
   the Web and CLI samples — see `docs/technical/` for the accuracy/engine
   tradeoffs per platform.
+
+## License
+
+Apache License 2.0 — see [LICENSE](LICENSE).
+
+## Security
+
+Found a vulnerability? See [SECURITY.md](SECURITY.md) for how to report it
+privately. Please don't open a public issue for security problems.
