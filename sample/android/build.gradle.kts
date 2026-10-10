@@ -37,7 +37,7 @@ dependencies {
     implementation(project(":aegisscan-camera"))
     implementation(project(":aegisscan-core"))
 
-    implementation("androidx.core:core-ktx:1.15.0")
+    implementation("androidx.core:core-ktx:1.19.1")
     implementation("androidx.activity:activity-ktx:1.9.3")
 
     // Needed directly because aegisscan-camera depends on these as
