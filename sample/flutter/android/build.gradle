@@ -1,0 +1,82 @@
+group = "com.aegisscan.aegis_scan_flutter"
+version = "1.0-SNAPSHOT"
+
+buildscript {
+    ext.kotlin_version = "2.1.0"
+    repositories {
+        google()
+        mavenCentral()
+    }
+
+    dependencies {
+        classpath("com.android.tools.build:gradle:8.7.3")
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version")
+    }
+}
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+        // The real aegisscan-core/aegisscan-camera, published here rather
+        // than via a Gradle composite build -- see
+        // spec/sample/react-native.md's "Why mavenLocal, not includeBuild"
+        // for why (same AGP-version-mismatch risk applies to any separate
+        // Gradle project, not just the RN one -- this one happens to match
+        // AGP 8.7.3 today, but mavenLocal avoids relying on that staying true).
+        mavenLocal()
+    }
+}
+
+apply plugin: "com.android.library"
+apply plugin: "kotlin-android"
+
+android {
+    namespace = "com.aegisscan.aegis_scan_flutter"
+
+    compileSdk = 35
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_11
+        targetCompatibility = JavaVersion.VERSION_11
+    }
+
+    kotlinOptions {
+        jvmTarget = JavaVersion.VERSION_11
+    }
+
+    sourceSets {
+        main.java.srcDirs += "src/main/kotlin"
+        test.java.srcDirs += "src/test/kotlin"
+    }
+
+    defaultConfig {
+        minSdk = 24
+    }
+
+    dependencies {
+        implementation("com.aegisscan:aegisscan-core:1.0.0")
+        implementation("com.aegisscan:aegisscan-camera:1.0.0")
+
+        // Needed directly because aegisscan-camera depends on these as
+        // `implementation` (not `api`), same as sample/android/build.gradle.kts.
+        def camerax = "1.4.1"
+        implementation("androidx.camera:camera-core:$camerax")
+        implementation("androidx.camera:camera-view:$camerax")
+
+        testImplementation("org.jetbrains.kotlin:kotlin-test")
+        testImplementation("org.mockito:mockito-core:5.0.0")
+    }
+
+    testOptions {
+        unitTests.all {
+            useJUnitPlatform()
+
+            testLogging {
+               events "passed", "skipped", "failed", "standardOut", "standardError"
+               outputs.upToDateWhen {false}
+               showStandardStreams = true
+            }
+        }
+    }
+}

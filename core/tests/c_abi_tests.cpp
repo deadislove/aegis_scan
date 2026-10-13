@@ -80,6 +80,89 @@ TEST(CAbiTest, ExtractPanErrorsAndNotFoundWipeOutput) {
             AEGIS_NOT_FOUND);
 }
 
+TEST(CAbiTest, ExtractExpiry) {
+  const std::string ocr = "CARD 4111 1111 1111 1111 EXP 12/29";
+  aegis_expiry expiry{};
+  ASSERT_EQ(aegis_extract_expiry(ocr.data(), static_cast<int32_t>(ocr.size()),
+                                 &expiry),
+            AEGIS_OK);
+  EXPECT_EQ(expiry.month, 12);
+  EXPECT_EQ(expiry.year, 2029);
+
+  EXPECT_EQ(aegis_extract_expiry("NO DATE HERE", 12, &expiry), AEGIS_NOT_FOUND);
+  EXPECT_EQ(expiry.month, 0);
+  EXPECT_EQ(expiry.year, 0);
+
+  EXPECT_EQ(aegis_extract_expiry(nullptr, 1, &expiry),
+            AEGIS_ERR_INVALID_ARGUMENT);
+  EXPECT_EQ(aegis_extract_expiry("12/29", 5, nullptr),
+            AEGIS_ERR_INVALID_ARGUMENT);
+}
+
+TEST(CAbiTest, ExtractCardholderName) {
+  const std::string ocr = "BANK OF AEGIS\n4111 1111 1111 1111\nJOHN DOE";
+  std::array<char, AEGIS_NAME_BUFFER_SIZE> out{};
+  int32_t len = -1;
+  ASSERT_EQ(aegis_extract_cardholder_name(
+                ocr.data(), static_cast<int32_t>(ocr.size()), out.data(),
+                static_cast<int32_t>(out.size()), &len),
+            AEGIS_OK);
+  EXPECT_EQ(len, 8);
+  EXPECT_EQ(std::string(out.data(), static_cast<std::size_t>(len)),
+            "JOHN DOE");
+
+  EXPECT_EQ(aegis_extract_cardholder_name("4111111111111111", 17, out.data(),
+                                          static_cast<int32_t>(out.size()),
+                                          &len),
+            AEGIS_NOT_FOUND);
+  EXPECT_EQ(len, 0);
+
+  // Truncates rather than erroring when the buffer is smaller than the name.
+  std::array<char, 4> small{};
+  EXPECT_EQ(
+      aegis_extract_cardholder_name(ocr.data(),
+                                    static_cast<int32_t>(ocr.size()),
+                                    small.data(),
+                                    static_cast<int32_t>(small.size()), &len),
+      AEGIS_OK);
+  EXPECT_EQ(len, 4);
+  EXPECT_EQ(std::string(small.data(), 4), "JOHN");
+
+  EXPECT_EQ(aegis_extract_cardholder_name(nullptr, 1, out.data(),
+                                          static_cast<int32_t>(out.size()),
+                                          &len),
+            AEGIS_ERR_INVALID_ARGUMENT);
+}
+
+TEST(CAbiTest, ExtractMrz) {
+  const std::string ocr =
+      "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<\n"
+      "L898902C36UTO7408122F1204159ZE184226B<<<<<10";
+  aegis_mrz mrz{};
+  ASSERT_EQ(aegis_extract_mrz(ocr.data(), static_cast<int32_t>(ocr.size()),
+                              &mrz),
+            AEGIS_OK);
+  EXPECT_STREQ(mrz.document_number, "L898902C3");
+  EXPECT_STREQ(mrz.nationality, "UTO");
+  EXPECT_STREQ(mrz.date_of_birth, "740812");
+  EXPECT_STREQ(mrz.expiry_date, "120415");
+  EXPECT_EQ(mrz.sex, 'F');
+  EXPECT_STREQ(mrz.surname, "ERIKSSON");
+  EXPECT_STREQ(mrz.given_names, "ANNA MARIA");
+  EXPECT_EQ(mrz.document_number_check_valid, 1);
+  EXPECT_EQ(mrz.date_of_birth_check_valid, 1);
+  EXPECT_EQ(mrz.expiry_check_valid, 1);
+  EXPECT_EQ(mrz.composite_check_valid, 1);
+
+  EXPECT_EQ(aegis_extract_mrz("NOT AN MRZ", 10, &mrz), AEGIS_NOT_FOUND);
+  EXPECT_EQ(mrz.document_number_check_valid, 0);  // Zero-filled on miss.
+
+  EXPECT_EQ(aegis_extract_mrz(nullptr, 1, &mrz), AEGIS_ERR_INVALID_ARGUMENT);
+  EXPECT_EQ(aegis_extract_mrz(ocr.data(), static_cast<int32_t>(ocr.size()),
+                              nullptr),
+            AEGIS_ERR_INVALID_ARGUMENT);
+}
+
 TEST(CAbiTest, AnalyzeLumaDefendsAgainstCorruptBuffers) {
   std::vector<uint8_t> px(640 * 480, 128);
   aegis_frame_metrics m{};

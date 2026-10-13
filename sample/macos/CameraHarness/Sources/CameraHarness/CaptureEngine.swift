@@ -97,7 +97,14 @@ final class CaptureEngine: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         onRawText?(joined)
 
         if let pan = FintechCore.extractPAN(from: joined) {
-            report(status: "Card: \(pan.brand) ****\(pan.last4)")
+            var status = "Card: \(pan.brand) ****\(pan.last4)"
+            if let expiry = FintechCore.extractExpiry(from: joined) {
+                status += " exp \(expiry.month)/\(expiry.year)"
+            }
+            if let name = FintechCore.extractCardholderName(from: joined) {
+                status += " (\(name))"
+            }
+            report(status: status)
             pan.wipe()
             return
         }

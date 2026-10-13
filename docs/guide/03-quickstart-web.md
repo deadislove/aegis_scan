@@ -26,8 +26,9 @@ const scanner = new FintechWebScanner({
   video: document.querySelector('video')!,
   onCard: (card) => {
     // card.digits is zeroed right after this callback returns -- send it
-    // to your tokenizer/HSM call here, synchronously.
-    statusEl.textContent = `${card.brand} ****${card.last4}`;
+    // to your tokenizer/HSM call here, synchronously. card.expiry/
+    // cardholderName are best-effort (no checksum backs them, unlike the PAN).
+    statusEl.textContent = `${card.brand} ****${card.last4} exp ${card.expiry} ${card.cardholderName}`;
   },
   onVouchers: (vouchers) => {
     statusEl.textContent = vouchers.map(v => v.payload).join(', ');
@@ -62,12 +63,19 @@ fonts before shipping it.
 ## 4. Without a camera (text you already have)
 
 ```ts
-import { extractCard } from '@aegisscan/web';
+import { extractCard, extractCardDetails } from '@aegisscan/web';
 
 const pan = extractCard(ocrText);
 if (pan) {
   console.log(pan.brand, pan.last4);
   pan.wipe();
+}
+
+// Also wants expiry/cardholder name from the same OCR pass:
+const details = extractCardDetails(ocrText);
+if (details) {
+  console.log(details.expiry, details.cardholderName);  // e.g. { month: 12, year: 2029 } "JOHN DOE"
+  details.wipe();
 }
 ```
 

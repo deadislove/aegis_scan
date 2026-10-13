@@ -36,6 +36,8 @@ Expected output (abridged):
 AegisScan core version: 1.0.0
 ValidateLuhn("4111111111111111") = True
 ExtractPan found: SecurePan(Visa, ****1111) (brand=Visa, length=16)
+ExtractExpiry found: 12/2029
+ExtractCardholderName found: JOHN DOE
 AnalyzeLuma: ok=True meanLuma=128.0 focusScore=0.000
 MatchBarcodesWithText: 1 match(es)
   barcode "099123456789" <-> text "VOUCHER 099123456789" (distance=0.050, alignment=1)
@@ -76,6 +78,11 @@ frames from whatever camera API its host app already uses).
 - `using SecurePan? pan = FintechCoreWrapper.ExtractPan(ocrText);` — always
   wrap the result in `using`/`Dispose()`. Never call `.UseDigits(...)`
   outside the `using` scope, and never copy the digits into a `string`.
+- `FintechCoreWrapper.ExtractCardDetails(ocrText)` runs the PAN, expiry, and
+  cardholder-name extraction over one OCR pass and attaches `Expiry`/
+  `CardholderName` to the returned `SecurePan` — prefer it over three
+  separate calls when you want all three. Expiry/name are best-effort (no
+  checksum backs them, unlike the PAN).
 - `FintechCoreWrapper` instances own a native matcher handle — create one
   per logical session (e.g. per POS terminal process) and `Dispose()` it
   when you're done, not per-frame.

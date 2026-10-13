@@ -34,6 +34,8 @@ export interface WireCard {
   digits: Uint8Array;
   brand: string;
   last4: string;
+  expiry: { month: number; year: number } | null;
+  cardholderName: string | null;
 }
 
 export interface WireVoucher {

@@ -43,6 +43,11 @@ if (pan is not null)
         return 0;
     });
 }
+
+// Also wants expiry/cardholder name from the same OCR pass (best-effort --
+// no checksum backs them, unlike the PAN):
+using SecurePan? details = FintechCoreWrapper.ExtractCardDetails(ocrText);
+Console.WriteLine($"{details?.Expiry} {details?.CardholderName}");  // e.g. ExpiryDate { Month = 12, Year = 2029 } JOHN DOE
 ```
 
 ## 4. Voucher matching

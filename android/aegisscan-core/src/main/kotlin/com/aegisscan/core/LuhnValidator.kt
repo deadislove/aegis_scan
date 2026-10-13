@@ -4,6 +4,9 @@ package com.aegisscan.core
 /** Card scheme (values mirror the C++ core `CardBrand`). */
 enum class CardBrand(val code: Int) { UNKNOWN(0), VISA(1), MASTERCARD(2), AMEX(3), JCB(4) }
 
+/** A parsed MM/YY (or MM/YYYY) expiry, as printed on the card. */
+data class ExpiryDate(val month: Int, val year: Int)
+
 /**
  * PAN held in a wipeable `CharArray` (never a `String`, which is immutable,
  * may be interned, and can't be cleared).
@@ -15,6 +18,11 @@ enum class CardBrand(val code: Int) { UNKNOWN(0), VISA(1), MASTERCARD(2), AMEX(3
 class SecurePan internal constructor(
     private val digits: CharArray,
     val brand: CardBrand,
+    /** Best-effort expiry, extracted from the same OCR text as the PAN. */
+    val expiry: ExpiryDate? = null,
+    /** Best-effort cardholder name, extracted from the same OCR text as the
+     * PAN. Not PCI-DSS sensitive on its own, so it isn't wiped with [close]. */
+    val cardholderName: String? = null,
 ) : AutoCloseable {
     /** Last four digits, safe to display (PCI-DSS 3.4). */
     val last4: String = if (digits.size >= 4) String(digits, digits.size - 4, 4) else ""
@@ -115,6 +123,96 @@ object LuhnValidator {
     /** Spec API: repaired PAN as a `String`. Prefer [extractCard]. */
     fun repairAndExtract(rawOcr: CharSequence): String? =
         extractCard(rawOcr)?.use { pan -> pan.withDigits { String(it) } }
+
+    private fun repairedDigit(c: Char): Int {
+        val r = repairChar(c)
+        return if (r in '0'..'9') r - '0' else -1
+    }
+
+    /**
+     * Scans for the first MM/YY or MM/YYYY pattern in raw OCR text. Unlike
+     * [extractCard], there's no checksum to validate an expiry date against --
+     * a transaction reference or address elsewhere in the frame that happens
+     * to look like "12/29" can't be distinguished from the real expiry. The
+     * month range check (01-12) is the only guard against an obviously-wrong
+     * match.
+     */
+    fun extractExpiry(rawOcr: CharSequence): ExpiryDate? {
+        for (i in rawOcr.indices) {
+            if (rawOcr[i] != '/' || i < 2) continue
+            val m1 = repairedDigit(rawOcr[i - 2])
+            val m0 = repairedDigit(rawOcr[i - 1])
+            if (m1 < 0 || m0 < 0) continue
+            val month = m1 * 10 + m0
+            if (month < 1 || month > 12) continue
+
+            val yearStart = i + 1
+            if (yearStart + 1 >= rawOcr.length) continue
+            val y1 = repairedDigit(rawOcr[yearStart])
+            val y0 = repairedDigit(rawOcr[yearStart + 1])
+            if (y1 < 0 || y0 < 0) continue
+
+            var year = 2000 + y1 * 10 + y0
+            if (yearStart + 3 < rawOcr.length) {
+                val y3 = repairedDigit(rawOcr[yearStart + 2])
+                val y2 = repairedDigit(rawOcr[yearStart + 3])
+                if (y3 >= 0 && y2 >= 0) year = y1 * 1000 + y0 * 100 + y3 * 10 + y2
+            }
+            return ExpiryDate(month, year)
+        }
+        return null
+    }
+
+    private val NAME_BLOCKLIST = setOf(
+        "VISA", "MASTERCARD", "AMEX", "AMERICAN", "EXPRESS", "JCB",
+        "DEBIT", "CREDIT", "BANK", "CARD", "GOLD", "PLATINUM", "SIGNATURE",
+        "REWARDS", "WORLD", "ELITE", "BUSINESS", "VALID", "THRU",
+    )
+
+    private fun isNameCandidateLine(line: CharSequence): Boolean {
+        if (line.length < 4) return false
+        for (c in line) if (c !in 'A'..'Z' && c != ' ') return false
+        var wordCount = 0
+        var start = 0
+        for (i in 0..line.length) {
+            if (i < line.length && line[i] != ' ') continue
+            if (i > start) {
+                wordCount++
+                if (line.substring(start, i) in NAME_BLOCKLIST) return false
+            }
+            start = i + 1
+        }
+        return wordCount >= 2
+    }
+
+    /**
+     * Best-effort cardholder name: the longest line in the raw OCR text that
+     * looks like a printed name (all uppercase letters/spaces, 2+ words, no
+     * known bank/network word). Markedly less reliable than [extractCard] or
+     * [extractExpiry] -- there's no structural signal to validate against,
+     * only "looks like a name and isn't a known non-name word." A name alone
+     * isn't PCI-DSS cardholder data, so this returns a plain `String`.
+     */
+    fun extractCardholderName(rawOcr: CharSequence): String? {
+        var best: String? = null
+        for (rawLine in rawOcr.split('\n')) {
+            val line = rawLine.trim()
+            if (line.length > (best?.length ?: -1) && isNameCandidateLine(line)) best = line
+        }
+        return best
+    }
+
+    /**
+     * PAN + expiry + cardholder name from one OCR pass. [extractCard] stays
+     * PAN-only for callers that don't want the extra scans.
+     */
+    fun extractCardDetails(rawOcr: CharSequence): SecurePan? {
+        val pan = extractCard(rawOcr) ?: return null
+        val expiry = extractExpiry(rawOcr)
+        val name = extractCardholderName(rawOcr)
+        if (expiry == null && name == null) return pan
+        return pan.use { p -> p.withDigits { digits -> SecurePan(digits.copyOf(), p.brand, expiry, name) } }
+    }
 
     /**
      * Allocation-bounded extraction: repairs OCR confusions, groups tokens into

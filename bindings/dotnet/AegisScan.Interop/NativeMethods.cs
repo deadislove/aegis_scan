@@ -47,6 +47,36 @@ public struct FrameMetrics
     public readonly bool IsOk => Status == 0;
 }
 
+/// <summary>Mirrors <c>aegis_expiry</c>.</summary>
+[StructLayout(LayoutKind.Sequential)]
+internal struct AegisExpiryNative
+{
+    public int Month;
+    public int Year;
+}
+
+/// <summary>
+/// Mirrors <c>aegis_mrz</c>. Fixed-size byte buffers (not <c>fixed char</c>
+/// -- these are UTF-8 bytes, not UTF-16 chars) replicate the native
+/// struct's layout exactly, including the padding the C compiler inserts
+/// before the trailing <c>int</c> fields to 4-byte-align them.
+/// </summary>
+[StructLayout(LayoutKind.Sequential)]
+internal unsafe struct AegisMrzNative
+{
+    public fixed byte DocumentNumber[10];
+    public fixed byte Nationality[4];
+    public fixed byte DateOfBirth[7];
+    public fixed byte ExpiryDate[7];
+    public byte Sex;
+    public fixed byte Surname[40];
+    public fixed byte GivenNames[40];
+    public int DocumentNumberCheckValid;
+    public int DateOfBirthCheckValid;
+    public int ExpiryCheckValid;
+    public int CompositeCheckValid;
+}
+
 /// <summary>
 /// Source-generated P/Invoke stubs ([LibraryImport]): marshalling code is
 /// produced at compile time, so there's no runtime IL stub generation and
@@ -62,6 +92,7 @@ internal static unsafe partial class NativeMethods
     internal const int NotFound = 1;
     internal const int ErrBufferTooSmall = -2;
     internal const int PanBufferSize = 20;
+    internal const int NameBufferSize = 64;
 
     [LibraryImport(Library, EntryPoint = "aegis_version")]
     internal static partial byte* Version();
@@ -72,6 +103,19 @@ internal static unsafe partial class NativeMethods
     [LibraryImport(Library, EntryPoint = "aegis_extract_pan_utf16")]
     internal static partial int ExtractPanUtf16(char* rawOcr, int rawLen, char* outDigits,
                                                 int outCapacity, int* outLen, int* outBrand);
+
+    /// <summary>UTF-8 only -- there's no UTF-16 native entry point for this call.</summary>
+    [LibraryImport(Library, EntryPoint = "aegis_extract_expiry")]
+    internal static partial int ExtractExpiry(byte* rawOcr, int rawLen, AegisExpiryNative* outExpiry);
+
+    /// <summary>UTF-8 only -- there's no UTF-16 native entry point for this call.</summary>
+    [LibraryImport(Library, EntryPoint = "aegis_extract_cardholder_name")]
+    internal static partial int ExtractCardholderName(byte* rawOcr, int rawLen, byte* outName,
+                                                       int outCapacity, int* outLen);
+
+    /// <summary>UTF-8 only -- there's no UTF-16 native entry point for this call.</summary>
+    [LibraryImport(Library, EntryPoint = "aegis_extract_mrz")]
+    internal static partial int ExtractMrz(byte* rawOcr, int rawLen, AegisMrzNative* outMrz);
 
     [LibraryImport(Library, EntryPoint = "aegis_analyze_luma")]
     internal static partial int AnalyzeLuma(byte* data, long dataLen, int width, int height,

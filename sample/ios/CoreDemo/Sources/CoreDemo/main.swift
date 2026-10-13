@@ -19,7 +19,7 @@ print()
 // Two characters misread as letters ('I'/'l' for '1'); the core repairs
 // them but still requires most digits to already be genuine -- it won't
 // "rescue" a mostly-garbled string.
-let noisyOcr = "CARD 4111-111I-1111-111l\nEXP 12/29 CVV 123"
+let noisyOcr = "JOHN DOE\nCARD 4111-111I-1111-111l\nEXP 12/29 CVV 123"
 if let pan = FintechCore.extractPAN(from: noisyOcr) {
     // Never log this in real code; .description is redacted on purpose but
     // isn't a substitute for just not logging PANs.
@@ -30,6 +30,14 @@ if let pan = FintechCore.extractPAN(from: noisyOcr) {
     pan.wipe() // Deterministic; the camera pipeline does this right after its callback returns.
 } else {
     print("extractPAN: no PAN found")
+}
+// Best-effort: scanned from the same OCR text, not validated by a checksum
+// the way the PAN is. CameraScannerPipeline attaches both automatically.
+if let expiry = FintechCore.extractExpiry(from: noisyOcr) {
+    print("extractExpiry found: \(expiry.month)/\(expiry.year)")
+}
+if let name = FintechCore.extractCardholderName(from: noisyOcr) {
+    print("extractCardholderName found: \(name)")
 }
 print()
 

@@ -8,6 +8,9 @@ namespace AegisScan.Interop;
 
 public enum CardBrand { Unknown = 0, Visa = 1, Mastercard = 2, Amex = 3, Jcb = 4 }
 
+/// <summary>A parsed MM/YY (or MM/YYYY) expiry, as printed on the card.</summary>
+public readonly record struct ExpiryDate(int Month, int Year);
+
 /// <summary>
 /// A PAN in a wipeable buffer, used instead of <see cref="System.Security.SecureString"/>,
 /// which Microsoft marks obsolete for new code because it gives no protection
@@ -30,19 +33,31 @@ public sealed class SecurePan : IDisposable
     private readonly int _length;
     private int _disposed;
 
-    internal SecurePan(ReadOnlySpan<char> digits, CardBrand brand)
+    internal SecurePan(ReadOnlySpan<char> digits, CardBrand brand, ExpiryDate? expiry = null,
+                       string? cardholderName = null)
     {
         _digits = GC.AllocateArray<char>(NativeMethods.PanBufferSize, pinned: true);
         digits.CopyTo(_digits);
         _length = digits.Length;
         Brand = brand;
         Last4 = _length >= 4 ? new string(_digits, _length - 4, 4) : string.Empty;
+        Expiry = expiry;
+        CardholderName = cardholderName;
     }
 
     public CardBrand Brand { get; }
 
     /// <summary>Last four digits (safe to display under PCI-DSS 3.4).</summary>
     public string Last4 { get; }
+
+    /// <summary>Best-effort expiry, extracted from the same OCR text as the PAN.</summary>
+    public ExpiryDate? Expiry { get; }
+
+    /// <summary>
+    /// Best-effort cardholder name, extracted from the same OCR text as the
+    /// PAN. Not PCI-DSS sensitive on its own, so it isn't wiped with <see cref="Dispose"/>.
+    /// </summary>
+    public string? CardholderName { get; }
 
     public bool IsDisposed => Volatile.Read(ref _disposed) != 0;
 

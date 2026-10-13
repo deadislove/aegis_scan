@@ -62,6 +62,84 @@ class LuhnValidatorTest {
         assertTrue(pan.isWiped)
         assertEquals(0, pan.length)
     }
+
+    @Test fun extractExpiry() {
+        val expiry = LuhnValidator.extractExpiry("VALID THRU 12/29")
+        assertEquals(12, expiry?.month)
+        assertEquals(2029, expiry?.year)
+        assertNull(LuhnValidator.extractExpiry("4111111111111111"))
+        // Invalid month is skipped, not returned.
+        assertNull(LuhnValidator.extractExpiry("13/45"))
+    }
+
+    @Test fun extractCardholderName() {
+        assertEquals(
+            "JOHN DOE",
+            LuhnValidator.extractCardholderName("BANK OF AEGIS\n4111111111111111\nJOHN DOE"),
+        )
+        // Brand/product words are filtered; plain digits have no candidate line.
+        assertNull(LuhnValidator.extractCardholderName("VISA PLATINUM\n4111111111111111"))
+    }
+}
+
+/** ICAO Doc 9303 worked example ("ERIKSSON ANNA MARIA"), the standard
+ * specimen used industry-wide for this purpose, not a real document. */
+class MrzParserTest {
+    @Test fun parsesValidTd3PassportSpecimen() {
+        val mrz = MrzParser.extractMrz(
+            "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<\n" +
+                "L898902C36UTO7408122F1204159ZE184226B<<<<<10",
+        )
+        assertEquals("L898902C3", mrz?.documentNumber)
+        assertEquals("UTO", mrz?.nationality)
+        assertEquals("740812", mrz?.dateOfBirth)
+        assertEquals("120415", mrz?.expiryDate)
+        assertEquals('F', mrz?.sex)
+        assertEquals("ERIKSSON", mrz?.surname)
+        assertEquals("ANNA MARIA", mrz?.givenNames)
+        assertTrue(mrz?.documentNumberCheckValid ?: false)
+        assertTrue(mrz?.dateOfBirthCheckValid ?: false)
+        assertTrue(mrz?.expiryCheckValid ?: false)
+        assertTrue(mrz?.compositeCheckValid ?: false)
+    }
+
+    @Test fun detectsCorruptedTd3CheckDigit() {
+        val mrz = MrzParser.extractMrz(
+            "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<\n" +
+                "L898902C36UTO7408122F1204159ZE184226B<<<<<11",
+        )
+        assertTrue(mrz?.documentNumberCheckValid ?: false) // Unaffected field.
+        assertFalse(mrz?.compositeCheckValid ?: true)
+    }
+
+    @Test fun parsesValidTd1IdCardSpecimenAndRepairsOcrConfusion() {
+        val clean = MrzParser.extractMrz(
+            "I<UTOAB12345671<<<<<<<<<<<<<<<\n" +
+                "7408122F3001019UTO<<<<<<<<<<<4\n" +
+                "ERIKSSON<<ANNA<MARIA<<<<<<<<<<",
+        )
+        assertEquals("AB1234567", clean?.documentNumber)
+        assertEquals("740812", clean?.dateOfBirth)
+        assertEquals("300101", clean?.expiryDate)
+        assertTrue(clean?.compositeCheckValid ?: false)
+
+        // '0' misread as 'O' in both date fields; check digits still
+        // computed against the repaired digits, same contract as extractExpiry.
+        val confused = MrzParser.extractMrz(
+            "I<UTOAB12345671<<<<<<<<<<<<<<<\n" +
+                "74O8122F3OO1O19UTO<<<<<<<<<<<4\n" +
+                "ERIKSSON<<ANNA<MARIA<<<<<<<<<<",
+        )
+        assertEquals("740812", confused?.dateOfBirth)
+        assertEquals("300101", confused?.expiryDate)
+        assertTrue(confused?.dateOfBirthCheckValid ?: false)
+        assertTrue(confused?.expiryCheckValid ?: false)
+    }
+
+    @Test fun rejectsTextWithNoMrzShapedLines() {
+        assertNull(MrzParser.extractMrz("JUST SOME ORDINARY OCR TEXT\nNOT AN MRZ AT ALL"))
+        assertNull(MrzParser.extractMrz(""))
+    }
 }
 
 class SpatialMatcherTest {

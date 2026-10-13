@@ -100,22 +100,38 @@ export function detectBrand(digits: string): CardBrand {
   return brandCodes(toCodes(digits), 0, digits.length);
 }
 
+/** A parsed MM/YY (or MM/YYYY) expiry, as printed on the card. */
+export interface ExpiryDate {
+  readonly month: number; // 1-12
+  readonly year: number; // 4-digit, e.g. 2029
+}
+
 /** A PAN in a wipeable buffer. Call wipe() as soon as you're done. */
 export interface ExtractedPan {
   /** ASCII digit codes. Zeroed by wipe(). */
   readonly digits: Uint8Array;
   readonly brand: CardBrand;
   readonly last4: string;
+  /** Best-effort expiry, extracted from the same OCR text as the PAN. */
+  readonly expiry: ExpiryDate | null;
+  /** Best-effort cardholder name, extracted from the same OCR text as the
+   * PAN. Not PCI-DSS sensitive on its own, so it isn't wiped with wipe(). */
+  readonly cardholderName: string | null;
   wipe(): void;
 }
 
-function makePan(src: Uint8Array, start: number, len: number, brand: CardBrand): ExtractedPan {
+function makePan(
+  src: Uint8Array, start: number, len: number, brand: CardBrand,
+  expiry: ExpiryDate | null = null, cardholderName: string | null = null,
+): ExtractedPan {
   const digits = src.slice(start, start + len);
   const last4 = String.fromCharCode(...digits.subarray(len - 4));
   return {
     digits,
     brand,
     last4,
+    expiry,
+    cardholderName,
     wipe: () => digits.fill(0),
   };
 }
@@ -238,4 +254,91 @@ export function repairAndExtract(rawOcr: string): string | null {
   const s = String.fromCharCode(...pan.digits);
   pan.wipe();
   return s;
+}
+
+function repairedDigit(code: number): number {
+  const r = repairCharCode(code);
+  return r >= ZERO && r <= NINE ? r - ZERO : -1;
+}
+
+/**
+ * Scans for the first MM/YY or MM/YYYY pattern in raw OCR text. Unlike
+ * extractCard(), there's no checksum to validate an expiry date against --
+ * a transaction reference or address elsewhere in the frame that happens to
+ * look like "12/29" can't be distinguished from the real expiry. The month
+ * range check (01-12) is the only guard against an obviously-wrong match.
+ */
+export function extractExpiry(rawOcr: string): ExpiryDate | null {
+  for (let i = 0; i < rawOcr.length; i++) {
+    if (rawOcr.charCodeAt(i) !== 0x2f || i < 2) continue; // '/'
+    const m1 = repairedDigit(rawOcr.charCodeAt(i - 2));
+    const m0 = repairedDigit(rawOcr.charCodeAt(i - 1));
+    if (m1 < 0 || m0 < 0) continue;
+    const month = m1 * 10 + m0;
+    if (month < 1 || month > 12) continue;
+
+    const yearStart = i + 1;
+    if (yearStart + 1 >= rawOcr.length) continue;
+    const y1 = repairedDigit(rawOcr.charCodeAt(yearStart));
+    const y0 = repairedDigit(rawOcr.charCodeAt(yearStart + 1));
+    if (y1 < 0 || y0 < 0) continue;
+
+    let year = 2000 + y1 * 10 + y0;
+    if (yearStart + 3 < rawOcr.length) {
+      const y3 = repairedDigit(rawOcr.charCodeAt(yearStart + 2));
+      const y2 = repairedDigit(rawOcr.charCodeAt(yearStart + 3));
+      if (y3 >= 0 && y2 >= 0) year = y1 * 1000 + y0 * 100 + y3 * 10 + y2;
+    }
+    return { month, year };
+  }
+  return null;
+}
+
+const NAME_BLOCKLIST = new Set([
+  'VISA', 'MASTERCARD', 'AMEX', 'AMERICAN', 'EXPRESS', 'JCB',
+  'DEBIT', 'CREDIT', 'BANK', 'CARD', 'GOLD', 'PLATINUM', 'SIGNATURE',
+  'REWARDS', 'WORLD', 'ELITE', 'BUSINESS', 'VALID', 'THRU',
+]);
+
+function isNameCandidateLine(line: string): boolean {
+  if (line.length < 4) return false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line.charCodeAt(i);
+    if (!((c >= 0x41 && c <= 0x5a) || c === 0x20)) return false; // A-Z or space
+  }
+  const words = line.split(' ').filter((w) => w.length > 0);
+  if (words.length < 2) return false;
+  return !words.some((w) => NAME_BLOCKLIST.has(w));
+}
+
+/**
+ * Best-effort cardholder name: the longest line in the raw OCR text that
+ * looks like a printed name (all uppercase letters/spaces, 2+ words, no
+ * known bank/network word). Markedly less reliable than extractCard() or
+ * extractExpiry() -- there's no structural signal to validate against, only
+ * "looks like a name and isn't a known non-name word." A name alone isn't
+ * PCI-DSS cardholder data, so this returns a plain string.
+ */
+export function extractCardholderName(rawOcr: string): string | null {
+  let best: string | null = null;
+  for (const rawLine of rawOcr.split('\n')) {
+    const line = rawLine.trim();
+    if (line.length > (best?.length ?? -1) && isNameCandidateLine(line)) best = line;
+  }
+  return best;
+}
+
+/**
+ * PAN + expiry + cardholder name from one OCR pass. extractCard() stays
+ * PAN-only for callers that don't want the extra scans.
+ */
+export function extractCardDetails(rawOcr: string): ExtractedPan | null {
+  const pan = extractCard(rawOcr);
+  if (!pan) return null;
+  const expiry = extractExpiry(rawOcr);
+  const cardholderName = extractCardholderName(rawOcr);
+  if (expiry === null && cardholderName === null) return pan;
+  const withDetails = makePan(pan.digits, 0, pan.digits.length, pan.brand, expiry, cardholderName);
+  pan.wipe();
+  return withDetails;
 }

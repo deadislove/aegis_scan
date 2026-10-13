@@ -67,10 +67,14 @@ class MainActivity : ComponentActivity() {
         when (event) {
             is ScanEvent.CardDetected -> {
                 // This is where a real integration hands the digits to its
-                // own tokenizer/HSM call. The sample only displays the brand
-                // and last 4 digits, which are safe to show under PCI-DSS 3.4.
+                // own tokenizer/HSM call. The sample only displays the brand,
+                // last 4 digits, expiry, and name, which are safe to show
+                // under PCI-DSS 3.4.
                 val pan = event.pan
-                statusText.text = "Card: ${pan.brand} ****${pan.last4}"
+                var text = "Card: ${pan.brand} ****${pan.last4}"
+                pan.expiry?.let { text += " exp ${it.month}/${it.year}" }
+                pan.cardholderName?.let { text += " ($it)" }
+                statusText.text = text
             }
             is ScanEvent.VouchersMatched -> {
                 val first = event.matches.first()

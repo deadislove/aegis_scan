@@ -475,6 +475,373 @@ inline std::optional<CardNumber> internal::PanRun::Evaluate() const noexcept {
 }
 
 // ---------------------------------------------------------------------------
+// Expiry date extraction
+// ---------------------------------------------------------------------------
+
+// Parsed MM/YY (or MM/YYYY) expiry, as printed on the card.
+struct ExpiryDate {
+  std::uint8_t month = 0;   // 1-12
+  std::uint16_t year = 0;   // 4-digit, e.g. 2029
+};
+
+// Scans for the first MM/YY or MM/YYYY pattern in raw OCR text, applying the
+// same character repair as PAN extraction to the four (or six) digits around
+// the slash. Unlike extract_card, there is no checksum to validate an expiry
+// date against, so this is strictly best-effort: a transaction reference or
+// an address elsewhere in the frame that happens to look like "12/29" cannot
+// be distinguished from the real expiry. The month range check (01-12) is
+// the only guard against an obviously-wrong match. Takes the first match in
+// reading order, consistent with how extract_card resolves ambiguity.
+inline std::optional<ExpiryDate> extract_expiry(
+    std::string_view raw_ocr) noexcept {
+  auto repaired_digit = [](char c) -> int {
+    const char r = internal::RepairOcrChar(c);
+    return internal::IsAsciiDigit(r) ? (r - '0') : -1;
+  };
+  for (std::size_t i = 0; i < raw_ocr.size(); ++i) {
+    if (raw_ocr[i] != '/' || i < 2) continue;
+    const int m1 = repaired_digit(raw_ocr[i - 2]);
+    const int m0 = repaired_digit(raw_ocr[i - 1]);
+    if (m1 < 0 || m0 < 0) continue;
+    const int month = m1 * 10 + m0;
+    if (month < 1 || month > 12) continue;
+
+    const std::size_t year_start = i + 1;
+    if (year_start + 1 >= raw_ocr.size()) continue;
+    const int y1 = repaired_digit(raw_ocr[year_start]);
+    const int y0 = repaired_digit(raw_ocr[year_start + 1]);
+    if (y1 < 0 || y0 < 0) continue;
+
+    int year = 2000 + y1 * 10 + y0;
+    // MM/YYYY if two more digits immediately follow; else MM/YY.
+    if (year_start + 3 < raw_ocr.size()) {
+      const int y3 = repaired_digit(raw_ocr[year_start + 2]);
+      const int y2 = repaired_digit(raw_ocr[year_start + 3]);
+      if (y3 >= 0 && y2 >= 0) year = y1 * 1000 + y0 * 100 + y3 * 10 + y2;
+    }
+    return ExpiryDate{static_cast<std::uint8_t>(month),
+                      static_cast<std::uint16_t>(year)};
+  }
+  return std::nullopt;
+}
+
+// ---------------------------------------------------------------------------
+// Cardholder name extraction
+// ---------------------------------------------------------------------------
+
+namespace internal {
+
+// Words that commonly appear on a card but are not part of the cardholder's
+// name. Not exhaustive -- this is a best-effort filter, not a name
+// validator, and new card products will always add words this list doesn't
+// have yet.
+inline constexpr std::array<std::string_view, 19> kNameBlocklist = {
+    "VISA",    "MASTERCARD", "AMEX",     "AMERICAN", "EXPRESS",  "JCB",
+    "DEBIT",   "CREDIT",     "BANK",     "CARD",     "GOLD",     "PLATINUM",
+    "SIGNATURE", "REWARDS",  "WORLD",    "ELITE",    "BUSINESS", "VALID",
+    "THRU",
+};
+
+constexpr bool IsUppercaseLetterOrSpace(char c) noexcept {
+  return (c >= 'A' && c <= 'Z') || c == ' ';
+}
+
+inline bool IsBlocklistedWord(std::string_view word) noexcept {
+  for (std::string_view blocked : kNameBlocklist) {
+    if (word == blocked) return true;
+  }
+  return false;
+}
+
+// A line reads as a name candidate if it's all uppercase letters/spaces
+// (names are printed in caps on virtually every card), has at least two
+// words (first + last name), and contains no word from the blocklist above.
+inline bool IsNameCandidateLine(std::string_view line) noexcept {
+  if (line.size() < 4) return false;  // Shorter than any plausible two-word name.
+  for (char c : line) {
+    if (!IsUppercaseLetterOrSpace(c)) return false;
+  }
+  int word_count = 0;
+  std::size_t start = 0;
+  for (std::size_t i = 0; i <= line.size(); ++i) {
+    if (i < line.size() && line[i] != ' ') continue;
+    if (i > start) {
+      ++word_count;
+      if (IsBlocklistedWord(line.substr(start, i - start))) return false;
+    }
+    start = i + 1;
+  }
+  return word_count >= 2;
+}
+
+}  // namespace internal
+
+// Best-effort cardholder name extraction: picks the longest line in the raw
+// OCR text that looks like a printed name (see IsNameCandidateLine above).
+// There is no PCI-DSS sensitivity here the way there is for a PAN -- a name
+// alone isn't cardholder data under PCI-DSS -- so the result is a plain
+// std::string, not a self-wiping type.
+//
+// This is markedly less reliable than extract_card or extract_expiry: there
+// is no structural signal (a checksum, a digit format) to validate against,
+// only "looks like a name and isn't a known non-name word." Expect a higher
+// miss/false-positive rate than the other two extractors, especially on
+// card designs this blocklist wasn't written with in mind.
+inline std::optional<std::string> extract_cardholder_name(
+    std::string_view raw_ocr) noexcept {
+  std::string_view best;
+  std::size_t pos = 0;
+  while (pos <= raw_ocr.size()) {
+    const std::size_t newline = raw_ocr.find('\n', pos);
+    std::string_view line = (newline == std::string_view::npos)
+                                 ? raw_ocr.substr(pos)
+                                 : raw_ocr.substr(pos, newline - pos);
+    while (!line.empty() && line.front() == ' ') line.remove_prefix(1);
+    while (!line.empty() && line.back() == ' ') line.remove_suffix(1);
+
+    if (line.size() > best.size() && internal::IsNameCandidateLine(line)) {
+      best = line;
+    }
+    if (newline == std::string_view::npos) break;
+    pos = newline + 1;
+  }
+  if (best.empty()) return std::nullopt;
+  return std::string(best);
+}
+
+// ---------------------------------------------------------------------------
+// MRZ (Machine-Readable Zone) parsing -- ICAO Doc 9303
+// ---------------------------------------------------------------------------
+
+// Parsed TD1 (3-line, ID card) or TD3 (2-line, passport) MRZ. Both formats
+// produce this same shape. Unlike expiry/cardholder-name above, every field
+// here is backed by an ICAO check digit (same mental model as Luhn backing
+// a PAN) -- *_check_valid tells you which fields to trust;
+// composite_check_valid covers document number, date of birth, expiry, and
+// (TD3) the personal-number field all at once, the way one Luhn digit backs
+// a whole PAN.
+struct MrzResult {
+  std::string document_number;  // '<' fill stripped
+  std::string nationality;      // 3-letter ICAO code
+  std::string date_of_birth;    // YYMMDD
+  std::string expiry_date;      // YYMMDD
+  char sex = '<';               // 'M', 'F', or '<' (unspecified)
+  std::string surname;
+  std::string given_names;
+  bool document_number_check_valid = false;
+  bool date_of_birth_check_valid = false;
+  bool expiry_check_valid = false;
+  bool composite_check_valid = false;
+};
+
+namespace internal {
+
+constexpr bool IsMrzChar(char c) noexcept {
+  return (c >= 'A' && c <= 'Z') || IsAsciiDigit(c) || c == '<';
+}
+
+// ICAO 9303 character value: digits are themselves, A-Z are 10-35, '<' is 0.
+constexpr int MrzCharValue(char c) noexcept {
+  if (IsAsciiDigit(c)) return c - '0';
+  if (c >= 'A' && c <= 'Z') return c - 'A' + 10;
+  return 0;  // '<' -- anything else is already excluded by IsMrzChar.
+}
+
+// ICAO 9303 check digit: weights 7, 3, 1 repeating, values summed mod 10.
+inline int MrzCheckDigit(std::string_view field) noexcept {
+  static constexpr int kWeights[3] = {7, 3, 1};
+  int sum = 0;
+  for (std::size_t i = 0; i < field.size(); ++i) {
+    sum += MrzCharValue(field[i]) * kWeights[i % 3];
+  }
+  return sum % 10;
+}
+
+inline bool MrzCheckDigitMatches(std::string_view field, char digit) noexcept {
+  return IsAsciiDigit(digit) && MrzCheckDigit(field) == (digit - '0');
+}
+
+// Repairs OCR confusions in a strictly-numeric MRZ field (the date fields),
+// the same map PAN/expiry digits use. Fails (returns false) if any
+// character can't be repaired to a digit -- unlike dates printed on a card,
+// an MRZ date field has no slash to anchor on, so a field that doesn't
+// repair cleanly to six digits is treated as unreadable rather than guessed.
+inline bool RepairNumericMrzField(std::string_view in, char* out) noexcept {
+  for (std::size_t i = 0; i < in.size(); ++i) {
+    const char r = RepairOcrChar(in[i]);
+    if (!IsAsciiDigit(r)) return false;
+    out[i] = r;
+  }
+  return true;
+}
+
+inline std::string StripMrzFill(std::string_view field) noexcept {
+  std::string out;
+  out.reserve(field.size());
+  for (char c : field) {
+    if (c != '<') out.push_back(c);
+  }
+  return out;
+}
+
+// Splits "SURNAME<<GIVEN<NAMES<<<<" into (surname, given names); internal
+// '<' separators become spaces, trailing fill is trimmed.
+inline void ParseMrzNameField(std::string_view field, std::string& surname,
+                              std::string& given_names) noexcept {
+  const std::size_t sep = field.find("<<");
+  const std::string_view surname_part =
+      sep == std::string_view::npos ? field : field.substr(0, sep);
+  const std::string_view given_part = sep == std::string_view::npos
+                                           ? std::string_view()
+                                           : field.substr(sep + 2);
+  auto render = [](std::string_view part) {
+    std::string out;
+    out.reserve(part.size());
+    for (char c : part) out.push_back(c == '<' ? ' ' : c);
+    while (!out.empty() && out.back() == ' ') out.pop_back();
+    return out;
+  };
+  surname = render(surname_part);
+  given_names = render(given_part);
+}
+
+// Scans raw_ocr for `count` consecutive lines of exactly `width` characters,
+// all drawn from the MRZ alphabet (A-Z, 0-9, <), after trimming the
+// surrounding whitespace OCR commonly adds. Returns an empty vector if no
+// such run exists.
+inline std::vector<std::string> FindMrzLines(std::string_view raw_ocr,
+                                             std::size_t width,
+                                             std::size_t count) noexcept {
+  std::vector<std::string_view> lines;
+  std::size_t pos = 0;
+  while (pos <= raw_ocr.size()) {
+    const std::size_t newline = raw_ocr.find('\n', pos);
+    std::string_view line = newline == std::string_view::npos
+                                 ? raw_ocr.substr(pos)
+                                 : raw_ocr.substr(pos, newline - pos);
+    while (!line.empty() && line.front() == ' ') line.remove_prefix(1);
+    while (!line.empty() && line.back() == ' ') line.remove_suffix(1);
+    lines.push_back(line);
+    if (newline == std::string_view::npos) break;
+    pos = newline + 1;
+  }
+  for (std::size_t start = 0; start + count <= lines.size(); ++start) {
+    bool all_match = true;
+    for (std::size_t i = 0; i < count && all_match; ++i) {
+      const std::string_view& l = lines[start + i];
+      if (l.size() != width) {
+        all_match = false;
+        continue;
+      }
+      for (char c : l) {
+        if (!IsMrzChar(c)) {
+          all_match = false;
+          break;
+        }
+      }
+    }
+    if (all_match) {
+      std::vector<std::string> out;
+      out.reserve(count);
+      for (std::size_t i = 0; i < count; ++i) out.emplace_back(lines[start + i]);
+      return out;
+    }
+  }
+  return {};
+}
+
+// Repairs a date-field-plus-check-digit span (7 chars: 6 digits + 1 check
+// digit, all strictly numeric) in one shot, so the check digit itself is
+// also OCR-repaired, not just the date. Falls back to the raw 7 characters
+// unrepaired when repair fails, so callers always have a defined 7-char
+// span to fold into the composite check -- it just won't validate.
+inline void RepairDateAndCheckField(std::string_view raw7, char out7[7]) {
+  if (!RepairNumericMrzField(raw7, out7)) {
+    for (std::size_t i = 0; i < 7; ++i) out7[i] = raw7[i];
+  }
+}
+
+inline MrzResult ParseMrzTd3(const std::vector<std::string>& lines) {
+  const std::string& l1 = lines[0];
+  const std::string& l2 = lines[1];
+  MrzResult r;
+  ParseMrzNameField(std::string_view(l1).substr(5), r.surname, r.given_names);
+
+  const std::string_view doc_num_field(l2.data(), 9);
+  r.document_number = StripMrzFill(doc_num_field);
+  r.document_number_check_valid = MrzCheckDigitMatches(doc_num_field, l2[9]);
+  r.nationality = l2.substr(10, 3);
+
+  char dob7[7];
+  RepairDateAndCheckField(std::string_view(l2).substr(13, 7), dob7);
+  r.date_of_birth.assign(dob7, 6);
+  r.date_of_birth_check_valid = MrzCheckDigitMatches(std::string_view(dob7, 6), dob7[6]);
+  r.sex = l2[20];
+
+  char exp7[7];
+  RepairDateAndCheckField(std::string_view(l2).substr(21, 7), exp7);
+  r.expiry_date.assign(exp7, 6);
+  r.expiry_check_valid = MrzCheckDigitMatches(std::string_view(exp7, 6), exp7[6]);
+
+  std::string composite_field;
+  composite_field += l2.substr(0, 10);                 // document number + its check digit
+  composite_field.append(dob7, 7);                      // DOB + its check digit (repaired)
+  composite_field.append(exp7, 7);                      // expiry + its check digit (repaired)
+  composite_field += l2.substr(28, 15);                 // personal number + its check digit
+  r.composite_check_valid = MrzCheckDigitMatches(composite_field, l2[43]);
+  return r;
+}
+
+inline MrzResult ParseMrzTd1(const std::vector<std::string>& lines) {
+  const std::string& l1 = lines[0];
+  const std::string& l2 = lines[1];
+  const std::string& l3 = lines[2];
+  MrzResult r;
+  ParseMrzNameField(l3, r.surname, r.given_names);
+
+  const std::string_view doc_num_field(l1.data() + 5, 9);
+  r.document_number = StripMrzFill(doc_num_field);
+  r.document_number_check_valid = MrzCheckDigitMatches(doc_num_field, l1[14]);
+
+  char dob7[7];
+  RepairDateAndCheckField(std::string_view(l2).substr(0, 7), dob7);
+  r.date_of_birth.assign(dob7, 6);
+  r.date_of_birth_check_valid = MrzCheckDigitMatches(std::string_view(dob7, 6), dob7[6]);
+  r.sex = l2[7];
+
+  char exp7[7];
+  RepairDateAndCheckField(std::string_view(l2).substr(8, 7), exp7);
+  r.expiry_date.assign(exp7, 6);
+  r.expiry_check_valid = MrzCheckDigitMatches(std::string_view(exp7, 6), exp7[6]);
+  r.nationality = l2.substr(15, 3);
+
+  std::string composite_field;
+  composite_field += l1.substr(5, 25);  // doc number+check + optional data 1
+  composite_field.append(dob7, 7);      // DOB + its check digit (repaired)
+  composite_field.append(exp7, 7);      // expiry + its check digit (repaired)
+  composite_field += l2.substr(18, 11);  // optional data 2
+  r.composite_check_valid = MrzCheckDigitMatches(composite_field, l2[29]);
+  return r;
+}
+
+}  // namespace internal
+
+// Scans raw OCR text for a TD3 (passport, 2 lines x 44 chars) or TD1 (ID
+// card, 3 lines x 30 chars) MRZ block and parses it. TD3 is tried first --
+// the two widths never collide (44 != 30), so there's no ambiguity. Returns
+// std::nullopt only when no MRZ-shaped line run is found at all; when one
+// is found but its check digits fail, the fields are still returned with
+// their *_check_valid flags false, so a caller can decide whether a
+// not-quite-matching MRZ (e.g. a damaged document) is still worth surfacing.
+inline std::optional<MrzResult> extract_mrz(std::string_view raw_ocr) noexcept {
+  std::vector<std::string> td3_lines = internal::FindMrzLines(raw_ocr, 44, 2);
+  if (!td3_lines.empty()) return internal::ParseMrzTd3(td3_lines);
+  std::vector<std::string> td1_lines = internal::FindMrzLines(raw_ocr, 30, 3);
+  if (!td1_lines.empty()) return internal::ParseMrzTd1(td1_lines);
+  return std::nullopt;
+}
+
+// ---------------------------------------------------------------------------
 // SpatialMatcher
 // ---------------------------------------------------------------------------
 
@@ -1087,6 +1454,151 @@ TEST(CardNumberTest, WipesOnMoveAndExposesLast4) {
   moved.Wipe();
   EXPECT_TRUE(moved.empty());
   EXPECT_EQ(moved.brand(), CardBrand::kUnknown);
+}
+
+// ---- Expiry date -----------------------------------------------------------
+
+TEST(ExpiryExtractorTest, ParsesTwoAndFourDigitYears) {
+  auto mmYY = extract_expiry("VALID THRU 12/29");
+  ASSERT_TRUE(mmYY.has_value());
+  EXPECT_EQ(mmYY->month, 12);
+  EXPECT_EQ(mmYY->year, 2029);
+
+  auto mmYYYY = extract_expiry("EXP 12/2029");
+  ASSERT_TRUE(mmYYYY.has_value());
+  EXPECT_EQ(mmYYYY->month, 12);
+  EXPECT_EQ(mmYYYY->year, 2029);
+}
+
+TEST(ExpiryExtractorTest, RepairsOcrConfusionInMonthDigits) {
+  // 'O' misread for '0': intended month is 10.
+  auto result = extract_expiry("1O/29");
+  ASSERT_TRUE(result.has_value());
+  EXPECT_EQ(result->month, 10);
+  EXPECT_EQ(result->year, 2029);
+}
+
+TEST(ExpiryExtractorTest, SkipsInvalidMonthAndTakesFirstValidMatch) {
+  // "13/45" isn't a valid month; the scan continues to the real expiry.
+  auto result = extract_expiry("REF 13/45 EXP 12/29");
+  ASSERT_TRUE(result.has_value());
+  EXPECT_EQ(result->month, 12);
+  EXPECT_EQ(result->year, 2029);
+}
+
+TEST(ExpiryExtractorTest, RejectsTextWithNoPlausibleExpiry) {
+  EXPECT_FALSE(extract_expiry("4111111111111111").has_value());
+  EXPECT_FALSE(extract_expiry("13/45").has_value());  // Month out of range.
+  EXPECT_FALSE(extract_expiry("/29").has_value());    // Nothing before the slash.
+  EXPECT_FALSE(extract_expiry("").has_value());
+}
+
+// ---- Cardholder name -------------------------------------------------------
+
+TEST(CardholderNameExtractorTest, FindsNameOnItsOwnLine) {
+  auto result = extract_cardholder_name(
+      "BANK OF AEGIS\n4111 1111 1111 1111\nVALID THRU 12/28\nJOHN DOE");
+  ASSERT_TRUE(result.has_value());
+  EXPECT_EQ(*result, "JOHN DOE");
+}
+
+TEST(CardholderNameExtractorTest, SkipsBlocklistedBrandAndProductLines) {
+  auto result = extract_cardholder_name("VISA PLATINUM\nJOHN Q PUBLIC");
+  ASSERT_TRUE(result.has_value());
+  EXPECT_EQ(*result, "JOHN Q PUBLIC");
+}
+
+TEST(CardholderNameExtractorTest, PrefersLongestCandidateLine) {
+  auto result = extract_cardholder_name("JOHN DOE\nMARY JANE SMITH");
+  ASSERT_TRUE(result.has_value());
+  EXPECT_EQ(*result, "MARY JANE SMITH");
+}
+
+TEST(CardholderNameExtractorTest, RejectsNonNameText) {
+  EXPECT_FALSE(extract_cardholder_name("4111111111111111").has_value());
+  EXPECT_FALSE(extract_cardholder_name("john doe").has_value());  // Not uppercase.
+  // "MASTERCARD" is blocklisted; "SMITH" alone is only one word.
+  EXPECT_FALSE(extract_cardholder_name("MASTERCARD\nSMITH").has_value());
+  EXPECT_FALSE(extract_cardholder_name("").has_value());
+}
+
+// ---- MRZ -------------------------------------------------------------------
+//
+// TD3 vectors are the worked example from ICAO Doc 9303 (fictional
+// "ERIKSSON ANNA MARIA" passport) -- the standard specimen used across the
+// industry for exactly this purpose, not a real document. TD1 vectors are
+// self-generated with the same check-digit algorithm (no published TD1
+// specimen is as universally cited as the TD3 one), verified independently
+// in Python before being hard-coded here.
+
+TEST(MrzExtractorTest, ParsesValidTd3PassportSpecimen) {
+  auto result = extract_mrz(
+      "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<\n"
+      "L898902C36UTO7408122F1204159ZE184226B<<<<<10");
+  ASSERT_TRUE(result.has_value());
+  EXPECT_EQ(result->document_number, "L898902C3");
+  EXPECT_EQ(result->nationality, "UTO");
+  EXPECT_EQ(result->date_of_birth, "740812");
+  EXPECT_EQ(result->expiry_date, "120415");
+  EXPECT_EQ(result->sex, 'F');
+  EXPECT_EQ(result->surname, "ERIKSSON");
+  EXPECT_EQ(result->given_names, "ANNA MARIA");
+  EXPECT_TRUE(result->document_number_check_valid);
+  EXPECT_TRUE(result->date_of_birth_check_valid);
+  EXPECT_TRUE(result->expiry_check_valid);
+  EXPECT_TRUE(result->composite_check_valid);
+}
+
+TEST(MrzExtractorTest, DetectsCorruptedTd3CheckDigit) {
+  // Composite check digit changed from '0' to '1'.
+  auto result = extract_mrz(
+      "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<\n"
+      "L898902C36UTO7408122F1204159ZE184226B<<<<<11");
+  ASSERT_TRUE(result.has_value());  // Still MRZ-shaped, just fails the check.
+  EXPECT_TRUE(result->document_number_check_valid);  // Unaffected field.
+  EXPECT_FALSE(result->composite_check_valid);
+}
+
+TEST(MrzExtractorTest, ParsesValidTd1IdCardSpecimen) {
+  auto result = extract_mrz(
+      "I<UTOAB12345671<<<<<<<<<<<<<<<\n"
+      "7408122F3001019UTO<<<<<<<<<<<4\n"
+      "ERIKSSON<<ANNA<MARIA<<<<<<<<<<");
+  ASSERT_TRUE(result.has_value());
+  EXPECT_EQ(result->document_number, "AB1234567");
+  EXPECT_EQ(result->date_of_birth, "740812");
+  EXPECT_EQ(result->expiry_date, "300101");
+  EXPECT_EQ(result->sex, 'F');
+  EXPECT_EQ(result->nationality, "UTO");
+  EXPECT_EQ(result->surname, "ERIKSSON");
+  EXPECT_EQ(result->given_names, "ANNA MARIA");
+  EXPECT_TRUE(result->document_number_check_valid);
+  EXPECT_TRUE(result->date_of_birth_check_valid);
+  EXPECT_TRUE(result->expiry_check_valid);
+  EXPECT_TRUE(result->composite_check_valid);
+}
+
+TEST(MrzExtractorTest, RepairsOcrConfusionInDateFields) {
+  // '0' misread as 'O' in both date fields; check digits still computed
+  // against the repaired digits, same contract as extract_expiry.
+  auto result = extract_mrz(
+      "I<UTOAB12345671<<<<<<<<<<<<<<<\n"
+      "74O8122F3OO1O19UTO<<<<<<<<<<<4\n"
+      "ERIKSSON<<ANNA<MARIA<<<<<<<<<<");
+  ASSERT_TRUE(result.has_value());
+  EXPECT_EQ(result->date_of_birth, "740812");
+  EXPECT_EQ(result->expiry_date, "300101");
+  EXPECT_TRUE(result->date_of_birth_check_valid);
+  EXPECT_TRUE(result->expiry_check_valid);
+}
+
+TEST(MrzExtractorTest, RejectsTextWithNoMrzShapedLines) {
+  EXPECT_FALSE(extract_mrz("JUST SOME ORDINARY OCR TEXT\nNOT AN MRZ AT ALL").has_value());
+  EXPECT_FALSE(extract_mrz("").has_value());
+  // Right alphabet, wrong width (neither line is 44 chars).
+  EXPECT_FALSE(extract_mrz(
+      "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<\n"
+      "L898902C36UTO7408122F1204159ZE184226B<<<<10").has_value());
 }
 
 // ---- SpatialMatcher ------------------------------------------------------------

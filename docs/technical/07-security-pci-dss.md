@@ -75,7 +75,19 @@ Every `SecurePAN`/`SecurePan` type computes and exposes `last4` as a plain
 one piece of card data in this SDK you're meant to hold onto and display
 (e.g. in a receipt UI), everything else should stay inside the callback.
 
-## 6. What this SDK does NOT do for you
+## 6. Expiry and cardholder name are best-effort, not wiped
+
+`expiry`/`cardholderName` (every platform's `SecurePAN`/`SecurePan`/`CardScan`
+type) are scanned from the same OCR text as the PAN but have no checksum
+backing them the way Luhn backs the PAN — treat them as display hints, not
+validated data. Neither is PCI-DSS cardholder data *on its own* (expiry
+alone, or a name alone, isn't sensitive the way a PAN is), so unlike the PAN
+digits they are **not** wiped by `wipe()`/`close()`/`Dispose()`. They only
+become sensitive in combination with the PAN — which is wiped — so don't
+independently cache or log `cardholderName` alongside a PAN you captured
+earlier in the same session.
+
+## 7. What this SDK does NOT do for you
 
 AegisScan performs capture, OCR repair, Luhn validation, and brand
 detection — it does not tokenize, encrypt, transmit, or store the PAN for

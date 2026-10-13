@@ -36,7 +36,7 @@ public final class Main {
     String ocrText = args.length > 0 ? String.join(" ", args)
         // Two characters misread as letters ('I'/'l' for '1'); the core
         // repairs them but still requires most digits to already be genuine.
-        : "CARD 4111-111I-1111-111l EXP 12/29";
+        : "JOHN DOE\nCARD 4111-111I-1111-111l EXP 12/29";
     System.out.println(args.length > 0 ? "Using OCR text from the command line:" : "Using built-in demo OCR text:");
     System.out.println("  \"" + ocrText + "\"");
     System.out.println();
@@ -67,6 +67,12 @@ public final class Main {
         System.out.println("extractPan found: " + pan + " brand=" + pan.brand());
       }
     }
+    // Best-effort: scanned from the same OCR text, not validated by a
+    // checksum the way the PAN is. extractCardDetails attaches both in one pass.
+    var expiry = core.extractExpiry(ocrText);
+    if (expiry != null) System.out.println("extractExpiry found: " + expiry.month() + "/" + expiry.year());
+    String name = core.extractCardholderName(ocrText);
+    if (name != null) System.out.println("extractCardholderName found: " + name);
 
     ByteBuffer luma = ByteBuffer.allocateDirect(64 * 64).order(ByteOrder.nativeOrder());
     for (int i = 0; i < luma.capacity(); i++) luma.put(i, (byte) 128);
@@ -94,6 +100,10 @@ public final class Main {
     try (FintechCoreJni.Pan pan = jni.extractPan(ocrText.toCharArray())) {
       System.out.println(pan == null ? "extractPan: no PAN found" : "extractPan found: " + pan);
     }
+    var expiry = jni.extractExpiry(ocrText.toCharArray());
+    if (expiry != null) System.out.println("extractExpiry found: " + expiry.month() + "/" + expiry.year());
+    String name = jni.extractCardholderName(ocrText.toCharArray());
+    if (name != null) System.out.println("extractCardholderName found: " + name);
 
     ByteBuffer luma = ByteBuffer.allocateDirect(64 * 64).order(ByteOrder.nativeOrder());
     for (int i = 0; i < luma.capacity(); i++) luma.put(i, (byte) 128);

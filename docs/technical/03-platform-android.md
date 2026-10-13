@@ -20,6 +20,15 @@ Android can call too — see [Platform: Java](06-platform-java.md)).
 `SecurePan` here is a wipeable `CharArray` (never `String`), `AutoCloseable`
 so `use { }` wipes it deterministically; `toString()` is redacted.
 
+`LuhnValidator.extractExpiry`/`extractCardholderName` are best-effort,
+unwiped `ExpiryDate?`/`String?` scanned from the same OCR text — no
+checksum backs them the way Luhn backs the PAN, and neither is PCI-DSS
+cardholder data on its own. `LuhnValidator.extractCardDetails` runs all
+three extractions over one OCR pass and attaches the results to one
+`SecurePan`; `AndroidCameraScannerEngine.processCard` calls it instead of
+`extractCard` so `ScanEvent.CardDetected.pan.expiry`/`.cardholderName` are
+populated automatically.
+
 ## `AndroidCameraScannerEngine`
 
 Implements `ImageAnalysis.Analyzer`. Two-layer back-pressure:

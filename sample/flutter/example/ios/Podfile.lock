@@ -1,0 +1,22 @@
+PODS:
+  - aegis_scan_flutter (0.0.1):
+    - Flutter
+  - Flutter (1.0.0)
+
+DEPENDENCIES:
+  - aegis_scan_flutter (from `.symlinks/plugins/aegis_scan_flutter/ios`)
+  - Flutter (from `Flutter`)
+
+EXTERNAL SOURCES:
+  aegis_scan_flutter:
+    :path: ".symlinks/plugins/aegis_scan_flutter/ios"
+  Flutter:
+    :path: Flutter
+
+SPEC CHECKSUMS:
+  aegis_scan_flutter: d65b0136d01deb9909fca606ac1602063713aa3b
+  Flutter: e0871f40cf51350855a761d2e70bf5af5b9b5de7
+
+PODFILE CHECKSUM: fb06a0d28f3894d9bb7d2d9a21dd607ce65d210f
+
+COCOAPODS: 1.17.0

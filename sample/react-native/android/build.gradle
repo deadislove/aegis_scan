@@ -1,0 +1,32 @@
+buildscript {
+    ext {
+        buildToolsVersion = "37.0.0"
+        minSdkVersion = 24
+        compileSdkVersion = 37
+        targetSdkVersion = 36
+        ndkVersion = "27.1.12297006"
+        kotlinVersion = "2.2.0"
+    }
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath("com.android.tools.build:gradle")
+        classpath("com.facebook.react:react-native-gradle-plugin")
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin")
+    }
+}
+
+apply plugin: "com.facebook.react.rootproject"
+
+// aegisscan-rn-bridge depends on the real AegisScan SDK via mavenLocal()
+// (see that module's build.gradle.kts for why) -- needs to be visible here
+// too, since Gradle resolves a consuming project's classpath (:app, which
+// depends on aegisscan-rn-bridge) using the CONSUMING project's own
+// repositories, not the dependency's.
+allprojects {
+    repositories {
+        mavenLocal()
+    }
+}

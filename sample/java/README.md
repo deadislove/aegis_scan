@@ -41,10 +41,14 @@ Expected output (abridged):
 native version: 1.0.0
 validateLuhn(4111111111111111) = true
 extractPan found: SecurePan(VISA, ****1111) brand=VISA
+extractExpiry found: 12/2029
+extractCardholderName found: JOHN DOE
 ...
 === Option B: FintechCoreJni (legacy JNI fallback) ===
 validateLuhn(4111111111111111) = true
 extractPan found: Pan(brand=1, ****1111)
+extractExpiry found: 12/2029
+extractCardholderName found: JOHN DOE
 ...
 ```
 
@@ -89,6 +93,10 @@ part this sample actually demonstrates.
   handed the digits to your tokenizer. Never call `.toString()` in a log
   statement; it's redacted on purpose but shouldn't be relied on as your only
   safeguard.
+- `extractCardDetails` runs the PAN, expiry, and cardholder-name extraction
+  over one OCR pass and attaches `expiry()`/`cardholderName()` to the
+  returned `SecurePan`/`Pan` — prefer it over three separate calls. Expiry/
+  name are best-effort (no checksum backs them, unlike the PAN).
 - `analyzeLuma` requires a **direct** `ByteBuffer` — a heap buffer throws
   `IllegalArgumentException`, by design, since the zero-copy guarantee
   wouldn't hold otherwise.

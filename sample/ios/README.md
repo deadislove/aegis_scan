@@ -26,6 +26,8 @@ Expected output (abridged):
 AegisScan core version: 1.0.0
 validateLuhn("4111111111111111") = true
 extractPAN found: SecurePAN(visa, ****1111) (brand=visa, length=16)
+extractExpiry found: 12/2029
+extractCardholderName found: JOHN DOE
 VoucherMatcher.match: 1 match(es)
   barcode "099123456789" <-> text "VOUCHER 099123456789" (distance=0.049752526)
 ```
@@ -56,10 +58,12 @@ in this repo, not a published version.
 
 - `ScannerViewModel` implements `CameraScannerPipelineDelegate` and bridges
   its main-queue callbacks into `@Published` SwiftUI state.
-- `didDetectCard pan:` reads `pan.brand`/`pan.last4` *synchronously, inside
-  the callback* — the pipeline wipes `pan` right after this method returns.
-  A real integration sends the digits to a tokenizer/HSM here instead of
-  just displaying them.
+- `didDetectCard pan:` reads `pan.brand`/`pan.last4`/`pan.expiry`/
+  `pan.cardholderName` *synchronously, inside the callback* — the pipeline
+  wipes `pan` right after this method returns. A real integration sends the
+  digits to a tokenizer/HSM here instead of just displaying them. (`expiry`/
+  `cardholderName` are best-effort, attached automatically by the pipeline;
+  no checksum backs them the way Luhn backs the PAN.)
 - `CameraPreviewView` is the standard `UIViewRepresentable` shim for
   attaching an `AVCaptureVideoPreviewLayer` to the pipeline's
   `session` (`CameraScannerPipeline.session`), so the preview and the

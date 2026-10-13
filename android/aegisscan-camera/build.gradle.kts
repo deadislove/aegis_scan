@@ -1,7 +1,17 @@
 plugins {
     id("com.android.library")
     id("org.jetbrains.kotlin.android")
+    id("maven-publish")
 }
+
+// Lets a separate Gradle/AGP toolchain (e.g. sample/react-native/android,
+// which can't share this build's Gradle version via includeBuild -- see
+// that project's settings.gradle for why) depend on this module via
+// mavenLocal() as plain "com.aegisscan:aegisscan-camera:1.0.0" coordinates.
+// Run `./gradlew :aegisscan-camera:publishToMavenLocal` after any change
+// this sample needs to pick up.
+group = "com.aegisscan"
+version = "1.0.0"
 
 android {
     namespace = "com.aegisscan.android"
@@ -27,6 +37,23 @@ android {
     sourceSets["main"].java.srcDirs("src/main/kotlin")
     sourceSets["test"].java.srcDirs("src/test/kotlin")
     testOptions { unitTests.all { it.useJUnitPlatform() } }
+
+    publishing {
+        singleVariant("release")
+    }
+}
+
+afterEvaluate {
+    publishing {
+        publications {
+            create<MavenPublication>("release") {
+                from(components["release"])
+                groupId = "com.aegisscan"
+                artifactId = "aegisscan-camera"
+                version = project.version.toString()
+            }
+        }
+    }
 }
 
 dependencies {

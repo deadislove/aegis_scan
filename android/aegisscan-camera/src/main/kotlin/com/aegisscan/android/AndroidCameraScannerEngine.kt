@@ -309,7 +309,7 @@ class AndroidCameraScannerEngine(
             if (i > 0) joined.append('\n')
             joined.append(l.text)
         }
-        val pan = LuhnValidator.extractCard(joined)
+        val pan = LuhnValidator.extractCardDetails(joined)
         joined.setLength(0)
         if (pan == null) {
             resetCandidate()

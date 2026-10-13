@@ -93,6 +93,91 @@ int32_t aegis_detect_brand(const char* digits, int32_t len) {
       std::string_view(digits, static_cast<std::size_t>(len))));
 }
 
+int32_t aegis_extract_expiry(const char* raw_ocr, int32_t raw_len,
+                             aegis_expiry* out_expiry) {
+  if (out_expiry == nullptr || raw_len < 0 ||
+      (raw_ocr == nullptr && raw_len > 0)) {
+    return AEGIS_ERR_INVALID_ARGUMENT;
+  }
+  out_expiry->month = 0;
+  out_expiry->year = 0;
+  const std::string_view input =
+      raw_len == 0 ? std::string_view()
+                   : std::string_view(raw_ocr,
+                                      static_cast<std::size_t>(raw_len));
+  const std::optional<core::ExpiryDate> expiry = core::extract_expiry(input);
+  if (!expiry) return AEGIS_NOT_FOUND;
+  out_expiry->month = expiry->month;
+  out_expiry->year = expiry->year;
+  return AEGIS_OK;
+}
+
+int32_t aegis_extract_cardholder_name(const char* raw_ocr, int32_t raw_len,
+                                      char* out_name, int32_t out_capacity,
+                                      int32_t* out_len) {
+  if (InvalidExtractArgs(raw_ocr, raw_len, out_name)) {
+    return AEGIS_ERR_INVALID_ARGUMENT;
+  }
+  if (out_len != nullptr) *out_len = 0;
+  const std::string_view input =
+      raw_len == 0 ? std::string_view()
+                   : std::string_view(raw_ocr,
+                                      static_cast<std::size_t>(raw_len));
+  const std::optional<std::string> name = core::extract_cardholder_name(input);
+  if (!name) return AEGIS_NOT_FOUND;
+  const std::size_t n =
+      std::min(name->size(), static_cast<std::size_t>(out_capacity));
+  std::copy_n(name->data(), n, out_name);
+  if (out_len != nullptr) *out_len = static_cast<int32_t>(n);
+  return AEGIS_OK;
+}
+
+namespace {
+
+// Copies `in` into `out` (capacity `cap`, including the NUL), truncating
+// rather than rejecting, then NUL-terminates. Matches the existing
+// cardholder-name truncation contract.
+void CopyTruncated(std::string_view in, char* out, std::size_t cap) {
+  const std::size_t n = std::min(in.size(), cap - 1);
+  std::copy_n(in.data(), n, out);
+  out[n] = '\0';
+}
+
+}  // namespace
+
+int32_t aegis_extract_mrz(const char* raw_ocr, int32_t raw_len,
+                          aegis_mrz* out_mrz) {
+  if (out_mrz == nullptr || raw_len < 0 ||
+      (raw_ocr == nullptr && raw_len > 0)) {
+    return AEGIS_ERR_INVALID_ARGUMENT;
+  }
+  *out_mrz = aegis_mrz{};
+  out_mrz->sex = '<';
+  const std::string_view input =
+      raw_len == 0 ? std::string_view()
+                   : std::string_view(raw_ocr,
+                                      static_cast<std::size_t>(raw_len));
+  const std::optional<core::MrzResult> mrz = core::extract_mrz(input);
+  if (!mrz) return AEGIS_NOT_FOUND;
+  CopyTruncated(mrz->document_number, out_mrz->document_number,
+               sizeof(out_mrz->document_number));
+  CopyTruncated(mrz->nationality, out_mrz->nationality,
+               sizeof(out_mrz->nationality));
+  CopyTruncated(mrz->date_of_birth, out_mrz->date_of_birth,
+               sizeof(out_mrz->date_of_birth));
+  CopyTruncated(mrz->expiry_date, out_mrz->expiry_date,
+               sizeof(out_mrz->expiry_date));
+  out_mrz->sex = mrz->sex;
+  CopyTruncated(mrz->surname, out_mrz->surname, sizeof(out_mrz->surname));
+  CopyTruncated(mrz->given_names, out_mrz->given_names,
+               sizeof(out_mrz->given_names));
+  out_mrz->document_number_check_valid = mrz->document_number_check_valid ? 1 : 0;
+  out_mrz->date_of_birth_check_valid = mrz->date_of_birth_check_valid ? 1 : 0;
+  out_mrz->expiry_check_valid = mrz->expiry_check_valid ? 1 : 0;
+  out_mrz->composite_check_valid = mrz->composite_check_valid ? 1 : 0;
+  return AEGIS_OK;
+}
+
 int32_t aegis_extract_pan(const char* raw_ocr, int32_t raw_len,
                           char* out_digits, int32_t out_capacity,
                           int32_t* out_len, int32_t* out_brand) {

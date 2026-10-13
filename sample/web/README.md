@@ -73,7 +73,9 @@ falls back to `barcodeFallbackUrl` (a WASM/JS module exporting
   secure context, `getUserMedia`, Workers, and `createImageBitmap` without
   prompting for permission.
 - `onCard`'s `card.digits` is a `Uint8Array` that's zeroed right after your
-  callback returns. Read `brand`/`last4` for display; send `digits` straight
-  to your tokenizer/HSM call inside the callback, synchronously.
+  callback returns. Read `brand`/`last4`/`expiry`/`cardholderName` for
+  display; send `digits` straight to your tokenizer/HSM call inside the
+  callback, synchronously. `expiry`/`cardholderName` are best-effort (no
+  checksum backs them, unlike the PAN).
 - Always pair `start()` with `stop()` (e.g. on page unload) — it releases
   the camera track and terminates the worker.

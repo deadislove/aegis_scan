@@ -92,6 +92,114 @@ public sealed partial class FintechCoreWrapper : IDisposable
         }
     }
 
+    /// <summary>
+    /// Scans for the first MM/YY or MM/YYYY pattern in raw OCR text. Unlike
+    /// <see cref="ExtractPan"/>, there's no checksum to validate an expiry date
+    /// against -- the month range check (01-12) is the only guard against an
+    /// obviously-wrong match. UTF-8 only: there's no UTF-16 native entry point
+    /// for this call, so the span is transcoded before crossing the boundary.
+    /// </summary>
+    public static unsafe ExpiryDate? ExtractExpiry(ReadOnlySpan<char> rawOcr)
+    {
+        int byteCount = Encoding.UTF8.GetByteCount(rawOcr);
+        Span<byte> utf8 = byteCount <= 512 ? stackalloc byte[byteCount] : new byte[byteCount];
+        Encoding.UTF8.GetBytes(rawOcr, utf8);
+        AegisExpiryNative expiry;
+        int status;
+        fixed (byte* input = utf8)
+        {
+            status = NativeMethods.ExtractExpiry(input, utf8.Length, &expiry);
+        }
+        if (status == NativeMethods.NotFound) return null;
+        if (status != NativeMethods.Ok) throw new FintechCoreException(status, "aegis_extract_expiry");
+        return new ExpiryDate(expiry.Month, expiry.Year);
+    }
+
+    /// <summary>
+    /// Best-effort cardholder name: the longest line in the raw OCR text that
+    /// looks like a printed name (all uppercase letters/spaces, 2+ words, no
+    /// known bank/network word). Markedly less reliable than <see cref="ExtractPan"/>
+    /// or <see cref="ExtractExpiry"/> -- there's no structural signal to
+    /// validate against. A name alone isn't PCI-DSS cardholder data, so this
+    /// returns a plain <see cref="string"/>.
+    /// </summary>
+    public static unsafe string? ExtractCardholderName(ReadOnlySpan<char> rawOcr)
+    {
+        int byteCount = Encoding.UTF8.GetByteCount(rawOcr);
+        Span<byte> utf8 = byteCount <= 512 ? stackalloc byte[byteCount] : new byte[byteCount];
+        Encoding.UTF8.GetBytes(rawOcr, utf8);
+        Span<byte> output = stackalloc byte[NativeMethods.NameBufferSize];
+        int len, status;
+        fixed (byte* input = utf8)
+        fixed (byte* outPtr = output)
+        {
+            status = NativeMethods.ExtractCardholderName(input, utf8.Length, outPtr, output.Length, &len);
+        }
+        if (status == NativeMethods.NotFound) return null;
+        if (status != NativeMethods.Ok) throw new FintechCoreException(status, "aegis_extract_cardholder_name");
+        return Encoding.UTF8.GetString(output[..len]);
+    }
+
+    /// <summary>
+    /// PAN + expiry + cardholder name from one OCR pass. <see cref="ExtractPan"/>
+    /// stays PAN-only for callers that don't want the extra scans.
+    /// </summary>
+    public static SecurePan? ExtractCardDetails(ReadOnlySpan<char> rawOcr)
+    {
+        SecurePan? pan = ExtractPan(rawOcr);
+        if (pan is null) return null;
+        ExpiryDate? expiry = ExtractExpiry(rawOcr);
+        string? name = ExtractCardholderName(rawOcr);
+        if (expiry is null && name is null) return pan;
+        using (pan)
+        {
+            return pan.UseDigits(digits => new SecurePan(digits, pan.Brand, expiry, name));
+        }
+    }
+
+    /// <summary>
+    /// Scans for a TD3 (passport, 2 lines x 44 chars) or TD1 (ID card, 3
+    /// lines x 30 chars) MRZ block in raw OCR text. Returns null only when
+    /// no MRZ-shaped line run is found at all; when one is found but its
+    /// check digits fail, the fields are still returned with their
+    /// <c>*CheckValid</c> properties false. UTF-8 only, same reason as
+    /// <see cref="ExtractExpiry"/>.
+    /// </summary>
+    public static unsafe MrzResult? ExtractMrz(ReadOnlySpan<char> rawOcr)
+    {
+        int byteCount = Encoding.UTF8.GetByteCount(rawOcr);
+        Span<byte> utf8 = byteCount <= 512 ? stackalloc byte[byteCount] : new byte[byteCount];
+        Encoding.UTF8.GetBytes(rawOcr, utf8);
+        AegisMrzNative mrz;
+        int status;
+        fixed (byte* input = utf8)
+        {
+            status = NativeMethods.ExtractMrz(input, utf8.Length, &mrz);
+        }
+        if (status == NativeMethods.NotFound) return null;
+        if (status != NativeMethods.Ok) throw new FintechCoreException(status, "aegis_extract_mrz");
+
+        static string Utf8ToString(byte* ptr, int maxLen)
+        {
+            int len = 0;
+            while (len < maxLen && ptr[len] != 0) len++;
+            return Encoding.UTF8.GetString(ptr, len);
+        }
+
+        return new MrzResult(
+            Utf8ToString(mrz.DocumentNumber, 10),
+            Utf8ToString(mrz.Nationality, 4),
+            Utf8ToString(mrz.DateOfBirth, 7),
+            Utf8ToString(mrz.ExpiryDate, 7),
+            (char)mrz.Sex,
+            Utf8ToString(mrz.Surname, 40),
+            Utf8ToString(mrz.GivenNames, 40),
+            mrz.DocumentNumberCheckValid != 0,
+            mrz.DateOfBirthCheckValid != 0,
+            mrz.ExpiryCheckValid != 0,
+            mrz.CompositeCheckValid != 0);
+    }
+
     /// <summary>Validates and measures an 8-bit luma plane without copying it.</summary>
     public static unsafe FrameMetrics AnalyzeLuma(ReadOnlySpan<byte> luma, int width, int height, int rowStride)
     {

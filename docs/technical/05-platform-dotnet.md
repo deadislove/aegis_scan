@@ -33,6 +33,11 @@ reason.
   pinned once, and handed to `aegis_matcher_match` as an array of
   `AegisItem` structs pointing into that arena — one pin/unpin per call, not
   one per string.
+- `ExtractExpiry`/`ExtractCardholderName`: unlike `ExtractPan`, there's no
+  UTF-16 native entry point for these, so the span is transcoded to UTF-8
+  (`Encoding.UTF8.GetBytes`, `stackalloc` below 512 bytes) before crossing
+  the boundary. `ExtractCardDetails` runs all three extractions over the
+  same OCR text in one call and attaches the results to one `SecurePan`.
 
 ## `SpatialMatcherHandle : SafeHandle`
 

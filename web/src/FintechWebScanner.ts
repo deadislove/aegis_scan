@@ -42,6 +42,11 @@ export interface CardScan {
   readonly digits: Uint8Array;
   readonly brand: string;
   readonly last4: string;
+  /** Best-effort expiry, extracted from the same OCR text as the PAN. */
+  readonly expiry: { month: number; year: number } | null;
+  /** Best-effort cardholder name, extracted from the same OCR text as the
+   * PAN. Markedly less reliable than `expiry` or the PAN itself. */
+  readonly cardholderName: string | null;
 }
 
 export interface FintechWebScannerOptions {
@@ -276,7 +281,7 @@ export class FintechWebScanner {
 
   private handleResult(msg: WireResult): void {
     if (msg.card) {
-      this.handleCard(msg.card.digits, msg.card.brand, msg.card.last4);
+      this.handleCard(msg.card.digits, msg.card.brand, msg.card.last4, msg.card.expiry, msg.card.cardholderName);
     } else {
       this.resetCard();
     }
@@ -284,7 +289,10 @@ export class FintechWebScanner {
   }
 
   /** Multi-frame confirmation, then delivery and an immediate wipe. */
-  private handleCard(digits: Uint8Array, brand: string, last4: string): void {
+  private handleCard(
+    digits: Uint8Array, brand: string, last4: string,
+    expiry: { month: number; year: number } | null, cardholderName: string | null,
+  ): void {
     const same = this.pendingCard !== null && this.pendingCard.length === digits.length &&
       this.pendingCard.every((v, i) => v === digits[i]);
     if (same) {
@@ -300,7 +308,7 @@ export class FintechWebScanner {
     this.pendingCard = null;
     this.pendingHits = 0;
     try {
-      this.opts.onCard?.({ digits: confirmed, brand, last4 });
+      this.opts.onCard?.({ digits: confirmed, brand, last4, expiry, cardholderName });
     } finally {
       confirmed.fill(0);  // Purged as soon as the callback returns.
     }

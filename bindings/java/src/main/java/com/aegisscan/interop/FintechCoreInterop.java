@@ -2,6 +2,7 @@
 package com.aegisscan.interop;
 
 import static java.lang.foreign.ValueLayout.ADDRESS;
+import static java.lang.foreign.ValueLayout.JAVA_BYTE;
 import static java.lang.foreign.ValueLayout.JAVA_CHAR;
 import static java.lang.foreign.ValueLayout.JAVA_FLOAT;
 import static java.lang.foreign.ValueLayout.JAVA_INT;
@@ -11,6 +12,7 @@ import java.lang.foreign.Arena;
 import java.lang.foreign.FunctionDescriptor;
 import java.lang.foreign.Linker;
 import java.lang.foreign.MemoryLayout;
+import java.lang.foreign.MemoryLayout.PathElement;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.StructLayout;
 import java.lang.foreign.SymbolLookup;
@@ -42,6 +44,7 @@ public final class FintechCoreInterop implements AutoCloseable {
   public static final int OK = 0;
   public static final int NOT_FOUND = 1;
   public static final int PAN_BUFFER_SIZE = 20;
+  public static final int NAME_BUFFER_SIZE = 64;
 
   /** {@code aegis_item}: {const char*, int32, 4 floats} + tail padding to 8. */
   static final StructLayout ITEM = MemoryLayout.structLayout(
@@ -58,6 +61,21 @@ public final class FintechCoreInterop implements AutoCloseable {
   static final StructLayout METRICS = MemoryLayout.structLayout(
       JAVA_INT.withName("status"), JAVA_FLOAT.withName("mean_luma"),
       JAVA_FLOAT.withName("focus_score"));
+  /** {@code aegis_mrz}: fixed-width UTF-8 byte fields + 4 check-valid flags,
+   * padded to 4-byte-align the trailing ints (same as the C struct). */
+  static final StructLayout MRZ = MemoryLayout.structLayout(
+      MemoryLayout.sequenceLayout(10, JAVA_BYTE).withName("document_number"),
+      MemoryLayout.sequenceLayout(4, JAVA_BYTE).withName("nationality"),
+      MemoryLayout.sequenceLayout(7, JAVA_BYTE).withName("date_of_birth"),
+      MemoryLayout.sequenceLayout(7, JAVA_BYTE).withName("expiry_date"),
+      JAVA_BYTE.withName("sex"),
+      MemoryLayout.sequenceLayout(40, JAVA_BYTE).withName("surname"),
+      MemoryLayout.sequenceLayout(40, JAVA_BYTE).withName("given_names"),
+      MemoryLayout.paddingLayout(3),
+      JAVA_INT.withName("document_number_check_valid"),
+      JAVA_INT.withName("date_of_birth_check_valid"),
+      JAVA_INT.withName("expiry_check_valid"),
+      JAVA_INT.withName("composite_check_valid"));
 
   public record Box(float x, float y, float width, float height) {}
   public record BarcodeItem(String payload, Box box) {}
@@ -69,6 +87,9 @@ public final class FintechCoreInterop implements AutoCloseable {
   private final MethodHandle version;
   private final MethodHandle luhnValidate;
   private final MethodHandle extractPanUtf16;
+  private final MethodHandle extractExpiry;
+  private final MethodHandle extractCardholderName;
+  private final MethodHandle extractMrz;
   private final MethodHandle analyzeLuma;
   private final MethodHandle matcherDestroy;
   private final MethodHandle matcherMatch;
@@ -92,6 +113,12 @@ public final class FintechCoreInterop implements AutoCloseable {
           FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_INT));
       extractPanUtf16 = bind(linker, lookup, "aegis_extract_pan_utf16",
           FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_INT, ADDRESS, JAVA_INT, ADDRESS, ADDRESS));
+      extractExpiry = bind(linker, lookup, "aegis_extract_expiry",
+          FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_INT, ADDRESS));
+      extractCardholderName = bind(linker, lookup, "aegis_extract_cardholder_name",
+          FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_INT, ADDRESS, JAVA_INT, ADDRESS));
+      extractMrz = bind(linker, lookup, "aegis_extract_mrz",
+          FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_INT, ADDRESS));
       analyzeLuma = bind(linker, lookup, "aegis_analyze_luma",
           FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG, JAVA_INT, JAVA_INT, JAVA_INT, ADDRESS));
       MethodHandle matcherCreate = bind(linker, lookup, "aegis_matcher_create",
@@ -198,6 +225,115 @@ public final class FintechCoreInterop implements AutoCloseable {
     }
   }
 
+  /**
+   * Scans for the first MM/YY or MM/YYYY pattern in raw OCR text. Unlike
+   * {@link #extractPan}, there's no checksum to validate an expiry date
+   * against -- the month range check (01-12) is the only guard against an
+   * obviously-wrong match. UTF-8 only: there's no UTF-16 native entry point
+   * for this call.
+   */
+  public ExpiryDate extractExpiry(CharSequence rawOcr) {
+    byte[] utf8 = rawOcr.toString().getBytes(StandardCharsets.UTF_8);
+    try (Arena arena = Arena.ofConfined()) {
+      MemorySegment in = arena.allocate(Math.max(1, utf8.length));
+      MemorySegment.copy(utf8, 0, in, JAVA_BYTE, 0, utf8.length);
+      MemorySegment out = arena.allocate(8);
+      int status = (int) extractExpiry.invokeExact(in, utf8.length, out);
+      if (status == NOT_FOUND) return null;
+      if (status != OK) throw new FintechCoreException(status, "aegis_extract_expiry");
+      return new ExpiryDate(out.get(JAVA_INT, 0), out.get(JAVA_INT, 4));
+    } catch (Throwable t) {
+      throw rethrow(t);
+    }
+  }
+
+  /**
+   * Best-effort cardholder name: the longest line in the raw OCR text that
+   * looks like a printed name (all uppercase letters/spaces, 2+ words, no
+   * known bank/network word). Markedly less reliable than {@link #extractPan}
+   * or {@link #extractExpiry} -- there's no structural signal to validate
+   * against. A name alone isn't PCI-DSS cardholder data, so this returns a
+   * plain {@link String}. UTF-8 only: there's no UTF-16 native entry point
+   * for this call.
+   */
+  public String extractCardholderName(CharSequence rawOcr) {
+    byte[] utf8 = rawOcr.toString().getBytes(StandardCharsets.UTF_8);
+    try (Arena arena = Arena.ofConfined()) {
+      MemorySegment in = arena.allocate(Math.max(1, utf8.length));
+      MemorySegment.copy(utf8, 0, in, JAVA_BYTE, 0, utf8.length);
+      MemorySegment out = arena.allocate(NAME_BUFFER_SIZE);
+      MemorySegment outLen = arena.allocate(JAVA_INT);
+      int status = (int) extractCardholderName.invokeExact(in, utf8.length, out, NAME_BUFFER_SIZE, outLen);
+      if (status == NOT_FOUND) return null;
+      if (status != OK) throw new FintechCoreException(status, "aegis_extract_cardholder_name");
+      int n = outLen.get(JAVA_INT, 0);
+      byte[] name = new byte[n];
+      MemorySegment.copy(out, JAVA_BYTE, 0, name, 0, n);
+      return new String(name, StandardCharsets.UTF_8);
+    } catch (Throwable t) {
+      throw rethrow(t);
+    }
+  }
+
+  /**
+   * Scans for a TD3 (passport, 2 lines x 44 chars) or TD1 (ID card, 3 lines
+   * x 30 chars) MRZ block in raw OCR text. Returns null only when no
+   * MRZ-shaped line run is found at all; when one is found but its check
+   * digits fail, the fields are still returned with their *CheckValid
+   * flags false. UTF-8 only, same reason as {@link #extractExpiry}.
+   */
+  public MrzResult extractMrz(CharSequence rawOcr) {
+    byte[] utf8 = rawOcr.toString().getBytes(StandardCharsets.UTF_8);
+    try (Arena arena = Arena.ofConfined()) {
+      MemorySegment in = arena.allocate(Math.max(1, utf8.length));
+      MemorySegment.copy(utf8, 0, in, JAVA_BYTE, 0, utf8.length);
+      MemorySegment out = arena.allocate(MRZ);
+      int status = (int) extractMrz.invokeExact(in, utf8.length, out);
+      if (status == NOT_FOUND) return null;
+      if (status != OK) throw new FintechCoreException(status, "aegis_extract_mrz");
+
+      return new MrzResult(
+          mrzField(out, "document_number"), mrzField(out, "nationality"),
+          mrzField(out, "date_of_birth"), mrzField(out, "expiry_date"),
+          (char) out.get(JAVA_BYTE, MRZ.byteOffset(PathElement.groupElement("sex"))),
+          mrzField(out, "surname"), mrzField(out, "given_names"),
+          mrzFlag(out, "document_number_check_valid"), mrzFlag(out, "date_of_birth_check_valid"),
+          mrzFlag(out, "expiry_check_valid"), mrzFlag(out, "composite_check_valid"));
+    } catch (Throwable t) {
+      throw rethrow(t);
+    }
+  }
+
+  /**
+   * PAN + expiry + cardholder name from one OCR pass. {@link #extractPan}
+   * stays PAN-only for callers that don't want the extra scans.
+   */
+  public SecurePan extractCardDetails(char[] rawOcr) {
+    SecurePan pan = extractPan(rawOcr);
+    if (pan == null) return null;
+    String text = new String(rawOcr);
+    ExpiryDate expiry = extractExpiry(text);
+    String name = extractCardholderName(text);
+    if (expiry == null && name == null) return pan;
+    char[] digits = new char[pan.length()];
+    try {
+      pan.copyDigitsTo(digits);
+      return new SecurePan(digits, pan.brand(), expiry, name);
+    } finally {
+      pan.close();
+    }
+  }
+
+  /** Convenience overload. Strings can't be wiped, so prefer {@code char[]}. */
+  public SecurePan extractCardDetails(CharSequence rawOcr) {
+    char[] copy = rawOcr.toString().toCharArray();
+    try {
+      return extractCardDetails(copy);
+    } finally {
+      java.util.Arrays.fill(copy, '\0');
+    }
+  }
+
   /** Zero-copy luma analysis on an off-heap segment. */
   public FrameMetrics analyzeLuma(MemorySegment luma, int width, int height, int rowStride) {
     if (!luma.isNative()) throw new IllegalArgumentException("luma must be an off-heap segment");
@@ -249,6 +385,23 @@ public final class FintechCoreInterop implements AutoCloseable {
     } catch (Throwable t) {
       throw rethrow(t);
     }
+  }
+
+  /** Reads one of {@link #MRZ}'s fixed-width byte fields as a NUL-trimmed UTF-8 string. */
+  private static String mrzField(MemorySegment mrz, String name) {
+    PathElement element = PathElement.groupElement(name);
+    long offset = MRZ.byteOffset(element);
+    int size = (int) MRZ.select(element).byteSize();
+    byte[] bytes = new byte[size];
+    MemorySegment.copy(mrz, JAVA_BYTE, offset, bytes, 0, size);
+    int n = 0;
+    while (n < bytes.length && bytes[n] != 0) n++;
+    return new String(bytes, 0, n, StandardCharsets.UTF_8);
+  }
+
+  /** Reads one of {@link #MRZ}'s int check-valid fields as a boolean. */
+  private static boolean mrzFlag(MemorySegment mrz, String name) {
+    return mrz.get(JAVA_INT, MRZ.byteOffset(PathElement.groupElement(name))) != 0;
   }
 
   private static void writeItem(Arena arena, MemorySegment items, int index, String text, Box box) {

@@ -1,0 +1,105 @@
+platform :ios, '15.0'
+
+# CocoaPods analytics sends network stats synchronously affecting flutter build latency.
+ENV['COCOAPODS_DISABLE_STATS'] = 'true'
+
+project 'Runner', {
+  'Debug' => :debug,
+  'Profile' => :release,
+  'Release' => :release,
+}
+
+def flutter_root
+  generated_xcode_build_settings_path = File.expand_path(File.join('..', 'Flutter', 'Generated.xcconfig'), __FILE__)
+  unless File.exist?(generated_xcode_build_settings_path)
+    raise "#{generated_xcode_build_settings_path} must exist. If you're running pod install manually, make sure flutter pub get is executed first"
+  end
+
+  File.foreach(generated_xcode_build_settings_path) do |line|
+    matches = line.match(/FLUTTER_ROOT\=(.*)/)
+    return matches[1].strip if matches
+  end
+  raise "FLUTTER_ROOT not found in #{generated_xcode_build_settings_path}. Try deleting Generated.xcconfig, then run flutter pub get"
+end
+
+require File.expand_path(File.join('packages', 'flutter_tools', 'bin', 'podhelper'), flutter_root)
+
+flutter_ios_podfile_setup
+
+target 'Runner' do
+  use_frameworks!
+
+  flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
+  target 'RunnerTests' do
+    inherit! :search_paths
+  end
+end
+
+post_install do |installer|
+  installer.pods_project.targets.each do |target|
+    flutter_additional_ios_build_settings(target)
+    # AegisScan requires iOS 15+; some pods (e.g. the Flutter engine pod
+    # itself) hardcode a lower deployment target in their own podspec that
+    # the Podfile's `platform :ios, '15.0'` directive doesn't override.
+    target.build_configurations.each do |config|
+      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'
+      # arm64-only: this environment has no x86_64 slice of the AegisScan
+      # SPM package cached, and this Mac is Apple Silicon anyway.
+      config.build_settings['EXCLUDED_ARCHS[sdk=iphonesimulator*]'] = 'i386 x86_64'
+    end
+  end
+
+  # Bridges in the real AegisScan SwiftPM package (repo root, four levels
+  # up from this file) for the aegis_scan_flutter pod -- same technique
+  # React Native's own `spm_dependency` Podfile helper uses internally
+  # (XCLocalSwiftPackageReference + XCSwiftPackageProductDependency),
+  # hand-rolled here since Flutter's CocoaPods integration doesn't ship an
+  # equivalent helper.
+  require 'xcodeproj'
+  project = installer.pods_project
+  pkg_path = File.expand_path(File.join(__dir__, '..', '..', '..', '..'))
+  pkg_class = Xcodeproj::Project::Object::XCLocalSwiftPackageReference
+  pkg = project.root_object.package_references.find { |p| p.class == pkg_class && p.relative_path == pkg_path }
+  unless pkg
+    pkg = project.new(pkg_class)
+    pkg.relative_path = pkg_path
+    project.root_object.package_references << pkg
+  end
+  bridge_target = project.targets.find { |t| t.name == 'aegis_scan_flutter' }
+  if bridge_target
+    ref_class = Xcodeproj::Project::Object::XCSwiftPackageProductDependency
+    ref = bridge_target.package_product_dependencies.find { |r| r.class == ref_class && r.package == pkg && r.product_name == 'AegisScan' }
+    unless ref
+      ref = project.new(ref_class)
+      ref.package = pkg
+      ref.product_name = 'AegisScan'
+      bridge_target.package_product_dependencies << ref
+    end
+    # package_product_dependencies alone registers the dependency for
+    # Xcode's build graph, but with use_frameworks! the linker only picks
+    # it up if it's also a PBXBuildFile in the Frameworks build phase
+    # (what Xcode itself generates when you add an SPM package by hand).
+    frameworks_phase = bridge_target.frameworks_build_phase
+    has_build_file = frameworks_phase.files.any? { |f| f.respond_to?(:product_ref) && f.product_ref == ref }
+    unless has_build_file
+      build_file = project.new(Xcodeproj::Project::Object::PBXBuildFile)
+      build_file.product_ref = ref
+      frameworks_phase.files << build_file
+    end
+    # Still not enough for a framework-type target (ours, since
+    # use_frameworks! is on): the *Swift compiler* (not just the linker)
+    # needs the package's built .swiftmodule on its search path. This is
+    # react-native's own spm.rb's documented workaround for exactly this
+    # "Swift package not found" case on non-static-library pod targets.
+    if bridge_target.product_type != 'com.apple.product-type.library.static'
+      bridge_target.build_configurations.each do |config|
+        config.build_settings['SWIFT_INCLUDE_PATHS'] ||= ['$(inherited)']
+        search_path = '${SYMROOT}/${CONFIGURATION}${EFFECTIVE_PLATFORM_NAME}/'
+        unless config.build_settings['SWIFT_INCLUDE_PATHS'].include?(search_path)
+          config.build_settings['SWIFT_INCLUDE_PATHS'] << search_path
+        end
+      end
+    end
+  end
+  project.save
+end

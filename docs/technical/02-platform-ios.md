@@ -51,15 +51,26 @@ end up in `UserDefaults` or a JSON log. `wipe()` calls `aegis_secure_zero`
 immediately after the delegate/closure callback returns, and `deinit` calls
 it again as a safety net.
 
+`expiry: ExpiryDate?` and `cardholderName: String?` are plain, unwiped
+properties — best-effort, scanned from the same OCR text as the PAN but not
+backed by a checksum, and not PCI-DSS cardholder data on their own.
+`CameraScannerPipeline.processCards` populates both automatically via an
+internal `extractCardDetails` helper; direct callers get them from
+`FintechCore.extractExpiry`/`extractCardholderName` below.
+
 ## `FintechCore` facade
 
 ```swift
 FintechCore.version -> String
 FintechCore.validateLuhn(_ digits: String) -> Bool
 FintechCore.extractPAN(from rawOCR: String) -> SecurePAN?
+FintechCore.extractExpiry(from rawOCR: String) -> ExpiryDate?
+FintechCore.extractCardholderName(from rawOCR: String) -> String?
 ```
 
-Thin wrappers over the C ABI (`aegis_luhn_validate`, `aegis_extract_pan`).
+Thin wrappers over the C ABI (`aegis_luhn_validate`, `aegis_extract_pan`,
+`aegis_extract_expiry`, `aegis_extract_cardholder_name` — the last two are
+UTF-8 only; there's no UTF-16 native entry point for them).
 `VoucherMatcher` (same file, `FintechCore.swift`) owns an
 `aegis_matcher_t*` handle, freed in `deinit`; it is **not** safe for
 concurrent use, which is why the pipeline keeps exactly one instance per

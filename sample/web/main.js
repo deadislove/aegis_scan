@@ -35,8 +35,11 @@ const scanner = new FintechWebScanner({
   onCard: (card) => {
     // `card.digits` is wiped right after this callback returns -- read what
     // you need (never the raw digits themselves) synchronously, here.
-    cardOut.textContent = `${card.brand} ****${card.last4}`;
-    log(`card detected: ${card.brand} ****${card.last4}`);
+    let summary = `${card.brand} ****${card.last4}`;
+    if (card.expiry) summary += ` exp ${card.expiry.month}/${card.expiry.year}`;
+    if (card.cardholderName) summary += ` (${card.cardholderName})`;
+    cardOut.textContent = summary;
+    log(`card detected: ${summary}`);
   },
   onVouchers: (vouchers) => {
     voucherOut.textContent = vouchers.map((v) => `${v.payload} (${v.associatedText})`).join(', ');

@@ -27,7 +27,7 @@ string ocrText = args.Length > 0 ? string.Join(' ', args)
     // repair map fixes them, but the core still requires most digits to be
     // genuine (it refuses to "rescue" a mostly-garbled string) so only
     // light noise works.
-    : "CARD NO: 4111-111I-1111-111l\nEXP 12/29 CVV 123";
+    : "JOHN DOE\nCARD NO: 4111-111I-1111-111l\nEXP 12/29 CVV 123";
 Console.WriteLine(args.Length > 0 ? "Using OCR text from the command line:" : "Using built-in demo OCR text:");
 Console.WriteLine($"  \"{ocrText}\"");
 Console.WriteLine();
@@ -47,6 +47,12 @@ else
         return 0;
     });
 } // Disposing wipes the digits here, deterministically.
+// Best-effort: scanned from the same OCR text, not validated by a checksum
+// the way the PAN is. ExtractCardDetails attaches both in one pass.
+ExpiryDate? expiry = FintechCoreWrapper.ExtractExpiry(ocrText);
+if (expiry is not null) Console.WriteLine($"ExtractExpiry found: {expiry.Value.Month}/{expiry.Value.Year}");
+string? cardholderName = FintechCoreWrapper.ExtractCardholderName(ocrText);
+if (cardholderName is not null) Console.WriteLine($"ExtractCardholderName found: {cardholderName}");
 Console.WriteLine();
 
 // 3. Frame quality check (synthetic luma plane) -----------------------------

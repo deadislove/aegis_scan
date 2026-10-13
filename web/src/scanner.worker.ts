@@ -17,7 +17,7 @@
 // Compiled with tsconfig.worker.json (lib: WebWorker), so `self` is a
 // DedicatedWorkerGlobalScope.
 
-import { CARD_BRAND_NAMES, extractCard } from './core/luhn.js';
+import { CARD_BRAND_NAMES, extractCardDetails } from './core/luhn.js';
 import { SpatialMatcher, type BarcodeItem, type TextItem } from './core/spatialMatcher.js';
 import type {
   MainToWorker, OcrLine, WireResult, WorkerConfig, WorkerErrorCode, WorkerToMain,
@@ -198,11 +198,14 @@ async function processFrame(frameId: number, bitmap: ImageBitmap): Promise<void>
     let card: WireResult['card'] = null;
     const transfer: Transferable[] = [];
     if (cfg.detectCards && texts.length > 0) {
-      const pan = extractCard(texts.map((t) => t.text).join('\n'));
+      const pan = extractCardDetails(texts.map((t) => t.text).join('\n'));
       if (pan) {
         const digits = new Uint8Array(pan.digits);  // Dedicated, transferable.
         pan.wipe();
-        card = { digits, brand: CARD_BRAND_NAMES[pan.brand], last4: pan.last4 };
+        card = {
+          digits, brand: CARD_BRAND_NAMES[pan.brand], last4: pan.last4,
+          expiry: pan.expiry, cardholderName: pan.cardholderName,
+        };
         transfer.push(digits.buffer);
       }
     }

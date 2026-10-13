@@ -24,8 +24,9 @@ layers own camera capture, threading, and memory ownership for their runtime.
 
 ## Why a shared core
 
-Luhn validation, OCR character repair, BIN/IIN brand detection, and
-barcode↔text spatial matching are pure, platform-independent algorithms.
+Luhn validation, OCR character repair, BIN/IIN brand detection, best-effort
+expiry/cardholder-name extraction, and barcode↔text spatial matching are
+pure, platform-independent algorithms.
 Implementing them five times would mean five places to find the same bug.
 Instead:
 

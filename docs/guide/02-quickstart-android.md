@@ -37,9 +37,10 @@ val engine = AndroidCameraScannerEngine(
     when (event) {
         is ScanEvent.CardDetected -> {
             // event.pan is wiped right after this lambda returns -- do your
-            // tokenizer/HSM call here, synchronously.
+            // tokenizer/HSM call here, synchronously. pan.expiry/cardholderName
+            // are best-effort (no checksum backs them, unlike the PAN).
             val pan = event.pan
-            statusText.text = "${pan.brand} ****${pan.last4}"
+            statusText.text = "${pan.brand} ****${pan.last4} exp ${pan.expiry} ${pan.cardholderName}"
         }
         is ScanEvent.VouchersMatched -> { /* event.matches */ }
         is ScanEvent.Error -> { /* event.error */ }
@@ -56,6 +57,11 @@ No manual `shutdown()` call is needed — the engine observes your
 ```kotlin
 LuhnValidator.extractCard(ocrText)?.use { pan ->
     println(pan)  // redacted: SecurePan(VISA, ****1234)
+}
+
+// Also wants expiry/cardholder name from the same OCR pass:
+LuhnValidator.extractCardDetails(ocrText)?.use { pan ->
+    println("${pan.expiry} ${pan.cardholderName}")  // e.g. ExpiryDate(12, 2029) JOHN DOE
 }
 ```
 

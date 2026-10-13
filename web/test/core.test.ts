@@ -2,7 +2,11 @@
 // Shared vectors with the C++ / Kotlin / Swift suites.
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { CardBrand, detectBrand, extractCard, repairAndExtract, validate } from '../src/core/luhn.js';
+import {
+  CardBrand, detectBrand, extractCard, extractCardDetails, extractCardholderName, extractExpiry,
+  repairAndExtract, validate,
+} from '../src/core/luhn.js';
+import { extractMrz } from '../src/core/mrz.js';
 import { SpatialMatcher } from '../src/core/spatialMatcher.js';
 
 const box = (x: number, y: number, width: number, height: number) => ({ x, y, width, height });
@@ -46,6 +50,84 @@ describe('LuhnValidator', () => {
     assert.equal(pan.last4, '0005');
     pan.wipe();
     assert.ok(pan.digits.every((d) => d === 0));
+  });
+  it('extracts expiry dates', () => {
+    const expiry = extractExpiry('VALID THRU 12/29');
+    assert.equal(expiry?.month, 12);
+    assert.equal(expiry?.year, 2029);
+    assert.equal(extractExpiry('4111111111111111'), null);
+    // Invalid month is skipped, not returned.
+    assert.equal(extractExpiry('13/45'), null);
+  });
+  it('extracts cardholder names', () => {
+    assert.equal(extractCardholderName('BANK OF AEGIS\n4111111111111111\nJOHN DOE'), 'JOHN DOE');
+    // Brand/product words are filtered; plain digits have no candidate line.
+    assert.equal(extractCardholderName('VISA PLATINUM\n4111111111111111'), null);
+  });
+  it('attaches expiry and name to the extracted PAN', () => {
+    const pan = extractCardDetails('BANK OF AEGIS\n4111 1111 1111 1111\nVALID THRU 12/29\nJOHN DOE');
+    assert.ok(pan);
+    assert.equal(String.fromCharCode(...pan.digits), '4111111111111111');
+    assert.equal(pan.expiry?.month, 12);
+    assert.equal(pan.expiry?.year, 2029);
+    assert.equal(pan.cardholderName, 'JOHN DOE');
+  });
+});
+
+describe('Mrz', () => {
+  // ICAO Doc 9303 worked example ("ERIKSSON ANNA MARIA"), the standard
+  // specimen used industry-wide for this purpose, not a real document.
+  it('parses a valid TD3 passport specimen', () => {
+    const mrz = extractMrz(
+      'P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<\n'
+      + 'L898902C36UTO7408122F1204159ZE184226B<<<<<10');
+    assert.ok(mrz);
+    assert.equal(mrz.documentNumber, 'L898902C3');
+    assert.equal(mrz.nationality, 'UTO');
+    assert.equal(mrz.dateOfBirth, '740812');
+    assert.equal(mrz.expiryDate, '120415');
+    assert.equal(mrz.sex, 'F');
+    assert.equal(mrz.surname, 'ERIKSSON');
+    assert.equal(mrz.givenNames, 'ANNA MARIA');
+    assert.ok(mrz.documentNumberCheckValid);
+    assert.ok(mrz.dateOfBirthCheckValid);
+    assert.ok(mrz.expiryCheckValid);
+    assert.ok(mrz.compositeCheckValid);
+  });
+  it('detects a corrupted TD3 composite check digit', () => {
+    const mrz = extractMrz(
+      'P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<\n'
+      + 'L898902C36UTO7408122F1204159ZE184226B<<<<<11');
+    assert.ok(mrz);
+    assert.ok(mrz.documentNumberCheckValid); // Unaffected field.
+    assert.equal(mrz.compositeCheckValid, false);
+  });
+  it('parses a valid TD1 ID card specimen and repairs OCR confusion', () => {
+    const clean = extractMrz(
+      'I<UTOAB12345671<<<<<<<<<<<<<<<\n'
+      + '7408122F3001019UTO<<<<<<<<<<<4\n'
+      + 'ERIKSSON<<ANNA<MARIA<<<<<<<<<<');
+    assert.ok(clean);
+    assert.equal(clean.documentNumber, 'AB1234567');
+    assert.equal(clean.dateOfBirth, '740812');
+    assert.equal(clean.expiryDate, '300101');
+    assert.ok(clean.compositeCheckValid);
+
+    // '0' misread as 'O' in both date fields; check digits still computed
+    // against the repaired digits, same contract as extractExpiry.
+    const confused = extractMrz(
+      'I<UTOAB12345671<<<<<<<<<<<<<<<\n'
+      + '74O8122F3OO1O19UTO<<<<<<<<<<<4\n'
+      + 'ERIKSSON<<ANNA<MARIA<<<<<<<<<<');
+    assert.ok(confused);
+    assert.equal(confused.dateOfBirth, '740812');
+    assert.equal(confused.expiryDate, '300101');
+    assert.ok(confused.dateOfBirthCheckValid);
+    assert.ok(confused.expiryCheckValid);
+  });
+  it('rejects text with no MRZ-shaped lines', () => {
+    assert.equal(extractMrz('JUST SOME ORDINARY OCR TEXT\nNOT AN MRZ AT ALL'), null);
+    assert.equal(extractMrz(''), null);
   });
 });
 

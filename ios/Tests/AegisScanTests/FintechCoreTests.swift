@@ -43,6 +43,56 @@ final class FintechCoreTests: XCTestCase {
         XCTAssertEqual(pan.withDigits { $0.count }, 0)
     }
 
+    func testExtractExpiry() {
+        let expiry = FintechCore.extractExpiry(from: "VALID THRU 12/29")
+        XCTAssertEqual(expiry?.month, 12)
+        XCTAssertEqual(expiry?.year, 2029)
+        XCTAssertNil(FintechCore.extractExpiry(from: "4111111111111111"))
+        // Invalid month is skipped, not returned.
+        XCTAssertNil(FintechCore.extractExpiry(from: "13/45"))
+    }
+
+    func testExtractCardholderName() {
+        XCTAssertEqual(
+            FintechCore.extractCardholderName(from: "BANK OF AEGIS\n4111111111111111\nJOHN DOE"),
+            "JOHN DOE")
+        // Brand/product words are filtered; plain digits have no candidate line.
+        XCTAssertNil(FintechCore.extractCardholderName(from: "VISA PLATINUM\n4111111111111111"))
+    }
+
+    func testExtractMrzParsesValidTd3PassportSpecimen() {
+        // ICAO Doc 9303 worked example ("ERIKSSON ANNA MARIA"), the standard
+        // specimen used industry-wide for this purpose, not a real document.
+        let mrz = FintechCore.extractMRZ(from:
+            "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<\n" +
+            "L898902C36UTO7408122F1204159ZE184226B<<<<<10")
+        XCTAssertEqual(mrz?.documentNumber, "L898902C3")
+        XCTAssertEqual(mrz?.nationality, "UTO")
+        XCTAssertEqual(mrz?.dateOfBirth, "740812")
+        XCTAssertEqual(mrz?.expiryDate, "120415")
+        XCTAssertEqual(mrz?.sex, "F")
+        XCTAssertEqual(mrz?.surname, "ERIKSSON")
+        XCTAssertEqual(mrz?.givenNames, "ANNA MARIA")
+        XCTAssertEqual(mrz?.documentNumberCheckValid, true)
+        XCTAssertEqual(mrz?.dateOfBirthCheckValid, true)
+        XCTAssertEqual(mrz?.expiryCheckValid, true)
+        XCTAssertEqual(mrz?.compositeCheckValid, true)
+    }
+
+    func testExtractMrzRejectsNonMrzText() {
+        XCTAssertNil(FintechCore.extractMRZ(from: "JUST SOME ORDINARY TEXT"))
+        XCTAssertNil(FintechCore.extractMRZ(from: ""))
+    }
+
+    func testCameraPipelineAttachesExpiryAndNameToConfirmedCard() throws {
+        let pan = try XCTUnwrap(FintechCore.extractCardDetails(
+            from: "BANK OF AEGIS\n4111 1111 1111 1111\nVALID THRU 12/29\nJOHN DOE"))
+        XCTAssertEqual(digits(pan), "4111111111111111")
+        XCTAssertEqual(pan.expiry?.month, 12)
+        XCTAssertEqual(pan.expiry?.year, 2029)
+        XCTAssertEqual(pan.cardholderName, "JOHN DOE")
+    }
+
     func testVoucherMatcherPrefersStackedText() throws {
         let matcher = try XCTUnwrap(VoucherMatcher())
         let barcode = DetectedBarcode(payload: "9876543210", symbology: "code128",

@@ -392,7 +392,7 @@ public final class CameraScannerPipeline: NSObject, @unchecked Sendable {
     func processCards(_ lines: [DetectedText], config: ScannerConfiguration) {
         var joined = lines.map(\.text).joined(separator: "\n")
         defer { joined.removeAll(keepingCapacity: false) }
-        guard let pan = FintechCore.extractPAN(from: joined) else {
+        guard let pan = FintechCore.extractCardDetails(from: joined) else {
             resetCardCandidate()
             return
         }

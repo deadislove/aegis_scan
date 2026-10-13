@@ -2,8 +2,9 @@
 
 A minimal Android app: a CameraX `PreviewView` plus
 `AndroidCameraScannerEngine` (`android/aegisscan-camera`) bound to the same
-activity lifecycle. Scanning a card shows its brand and last 4 digits;
-scanning a voucher barcode near some text shows the match.
+activity lifecycle. Scanning a card shows its brand, last 4 digits, and
+(when found) expiry/cardholder name; scanning a voucher barcode near some
+text shows the match.
 
 ## How it's wired in
 
@@ -43,15 +44,17 @@ if `./gradlew` can't find an SDK/JDK on your machine.
 - The `listener` lambda receives `ScanEvent.CardDetected` /
   `VouchersMatched` / `Error` on the main thread. `event.pan` (for a
   detected card) is wiped by the engine immediately after this lambda
-  returns — read `brand`/`last4` synchronously, as shown; never store the
-  `SecurePan` itself.
+  returns — read `brand`/`last4`/`expiry`/`cardholderName` synchronously,
+  as shown; never store the `SecurePan` itself. `expiry`/`cardholderName`
+  are best-effort (no checksum backs them, unlike the PAN).
 - `engine.shutdown()` isn't called explicitly — the engine registers its own
   `DefaultLifecycleObserver` and shuts down on `ON_DESTROY` automatically.
 
 ## PCI-DSS note
 
-This sample only ever displays `pan.brand` and `pan.last4` (safe to show per
-PCI-DSS 3.4 truncation rules). A real integration would replace that
+This sample only ever displays `pan.brand`, `pan.last4` (safe to show per
+PCI-DSS 3.4 truncation rules), and the best-effort `pan.expiry`/
+`pan.cardholderName`. A real integration would replace that
 `statusText.text = ...` line with a synchronous call to your tokenizer or
 HSM, still inside the listener callback, still never logging or persisting
 the full PAN.

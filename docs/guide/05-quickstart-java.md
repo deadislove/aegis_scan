@@ -27,6 +27,12 @@ try (FintechCoreInterop core = new FintechCoreInterop(Path.of("core/build/libaeg
             // try block -- `pan` is wiped as soon as it closes.
         }
     }
+
+    // Also wants expiry/cardholder name from the same OCR pass (best-effort
+    // -- no checksum backs them, unlike the PAN):
+    try (SecurePan details = core.extractCardDetails(ocrText.toCharArray())) {
+        if (details != null) System.out.println(details.expiry() + " " + details.cardholderName());
+    }
 }
 ```
 

@@ -48,6 +48,57 @@ class InteropTest {
   }
 
   @Test
+  void ffmExtractsExpiryAndCardholderName() {
+    try (FintechCoreInterop core = new FintechCoreInterop(coreLib())) {
+      ExpiryDate expiry = core.extractExpiry("VALID THRU 12/29");
+      assertEquals(12, expiry.month());
+      assertEquals(2029, expiry.year());
+      assertNull(core.extractExpiry("4111111111111111"));
+      assertNull(core.extractExpiry("13/45"));  // Invalid month is skipped, not returned.
+
+      assertEquals("JOHN DOE",
+          core.extractCardholderName("BANK OF AEGIS\n4111111111111111\nJOHN DOE"));
+      assertNull(core.extractCardholderName("VISA PLATINUM\n4111111111111111"));
+
+      try (SecurePan pan = core.extractCardDetails(
+          "BANK OF AEGIS\n4111 1111 1111 1111\nVALID THRU 12/29\nJOHN DOE")) {
+        assertNotNull(pan);
+        char[] buf = new char[19];
+        pan.copyDigitsTo(buf);
+        assertEquals("4111111111111111", new String(buf, 0, pan.length()));
+        assertEquals(12, pan.expiry().month());
+        assertEquals(2029, pan.expiry().year());
+        assertEquals("JOHN DOE", pan.cardholderName());
+      }
+    }
+  }
+
+  @Test
+  void ffmExtractsMrz() {
+    try (FintechCoreInterop core = new FintechCoreInterop(coreLib())) {
+      // ICAO Doc 9303 worked example ("ERIKSSON ANNA MARIA"), the standard
+      // specimen used industry-wide for this purpose, not a real document.
+      MrzResult mrz = core.extractMrz(
+          "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<\n"
+              + "L898902C36UTO7408122F1204159ZE184226B<<<<<10");
+      assertNotNull(mrz);
+      assertEquals("L898902C3", mrz.documentNumber());
+      assertEquals("UTO", mrz.nationality());
+      assertEquals("740812", mrz.dateOfBirth());
+      assertEquals("120415", mrz.expiryDate());
+      assertEquals('F', mrz.sex());
+      assertEquals("ERIKSSON", mrz.surname());
+      assertEquals("ANNA MARIA", mrz.givenNames());
+      assertTrue(mrz.documentNumberCheckValid());
+      assertTrue(mrz.dateOfBirthCheckValid());
+      assertTrue(mrz.expiryCheckValid());
+      assertTrue(mrz.compositeCheckValid());
+
+      assertNull(core.extractMrz("JUST SOME ORDINARY TEXT"));
+    }
+  }
+
+  @Test
   void ffmZeroCopyLumaAndCorruptBuffers() {
     try (FintechCoreInterop core = new FintechCoreInterop(coreLib());
          Arena arena = Arena.ofConfined()) {
@@ -113,6 +164,35 @@ class InteropTest {
         assertEquals("0005", pan.last4());
       }
       assertNull(jni.extractPan("HELLO".toCharArray()));
+
+      ExpiryDate expiry = jni.extractExpiry("VALID THRU 12/29".toCharArray());
+      assertEquals(12, expiry.month());
+      assertEquals(2029, expiry.year());
+      assertNull(jni.extractExpiry("4111111111111111".toCharArray()));
+
+      assertEquals("JOHN DOE",
+          jni.extractCardholderName("BANK OF AEGIS\n4111111111111111\nJOHN DOE".toCharArray()));
+      assertNull(jni.extractCardholderName("VISA PLATINUM\n4111111111111111".toCharArray()));
+
+      MrzResult mrz = jni.extractMrz(
+          ("P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<\n"
+              + "L898902C36UTO7408122F1204159ZE184226B<<<<<10").toCharArray());
+      assertNotNull(mrz);
+      assertEquals("L898902C3", mrz.documentNumber());
+      assertEquals("ERIKSSON", mrz.surname());
+      assertEquals("ANNA MARIA", mrz.givenNames());
+      assertTrue(mrz.compositeCheckValid());
+      assertNull(jni.extractMrz("JUST SOME ORDINARY TEXT".toCharArray()));
+
+      try (FintechCoreJni.Pan details = jni.extractCardDetails(
+          "BANK OF AEGIS\n4111 1111 1111 1111\nVALID THRU 12/29\nJOHN DOE".toCharArray())) {
+        assertNotNull(details);
+        assertEquals("1111", details.last4());
+        assertEquals(12, details.expiry.month());
+        assertEquals(2029, details.expiry.year());
+        assertEquals("JOHN DOE", details.cardholderName);
+      }
+
       ByteBuffer direct = ByteBuffer.allocateDirect(640 * 480);
       for (int i = 0; i < direct.capacity(); i++) direct.put(i, (byte) 128);
       assertTrue(jni.analyzeLuma(direct, 640, 480, 640).ok());

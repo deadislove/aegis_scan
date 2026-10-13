@@ -34,8 +34,9 @@ final class ScannerViewModel: NSObject, ObservableObject, CameraScannerPipelineD
 
     func scanner(_ scanner: CameraScannerPipeline, didDetectCard pan: SecurePAN) {
         // pan is wiped the instant this method returns -- do your
-        // tokenizer/HSM call here, synchronously, not after.
-        lastCard = "\(pan.brand) ****\(pan.last4)"
+        // tokenizer/HSM call here, synchronously, not after. pan.expiry/
+        // cardholderName are best-effort (no checksum backs them, unlike the PAN).
+        lastCard = "\(pan.brand) ****\(pan.last4) exp \(String(describing: pan.expiry)) \(pan.cardholderName ?? "")"
     }
 }
 ```
@@ -51,6 +52,14 @@ Attach `viewModel.pipeline.session` to an `AVCaptureVideoPreviewLayer`
 if let pan = FintechCore.extractPAN(from: ocrText) {
     print(pan)       // redacted: SecurePAN(visa, ****1234)
     pan.wipe()        // or let it fall out of scope / rely on deinit
+}
+
+// Also wants expiry/cardholder name from the same OCR pass:
+if let expiry = FintechCore.extractExpiry(from: ocrText) {
+    print(expiry.month, expiry.year)  // e.g. 12 2029
+}
+if let name = FintechCore.extractCardholderName(from: ocrText) {
+    print(name)  // e.g. "JOHN DOE"
 }
 ```
 

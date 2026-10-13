@@ -1,0 +1,20 @@
+pluginManagement { includeBuild("../node_modules/@react-native/gradle-plugin") }
+plugins { id("com.facebook.react.settings") }
+extensions.configure(com.facebook.react.ReactSettingsExtension){ ex -> ex.autolinkLibrariesFromCommand() }
+rootProject.name = 'AegisScanRNSample'
+include ':app'
+includeBuild('../node_modules/@react-native/gradle-plugin')
+
+// aegisscan-rn-bridge is the native module source (this sample's own code).
+// It depends on the real AegisScan SDK (com.aegisscan:aegisscan-core /
+// aegisscan-camera) via mavenLocal() -- see that module's build.gradle.kts.
+// A plain `includeBuild('../../../android')` composite build was tried
+// first and rejected: that project pins Gradle 8.11.1 + AGP 8.7.3, this one
+// resolves Gradle 9.4.1 + a newer AGP, and composite builds run everything
+// under ONE Gradle version -- composing them produced AGP-internal
+// ClassCastExceptions (two AGP versions' copies of the same class loaded at
+// once). Publish-to-mavenLocal fully decouples the two toolchains instead:
+//   cd android && ./gradlew :aegisscan-core:publishToMavenLocal \
+//                           :aegisscan-camera:publishToMavenLocal
+// (one-time, re-run after any change this sample needs to pick up).
+include ':aegisscan-rn-bridge'

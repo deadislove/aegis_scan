@@ -8,6 +8,12 @@ public enum CardBrand: Int32, Sendable {
     case unknown = 0, visa, mastercard, amex, jcb
 }
 
+/// A parsed MM/YY (or MM/YYYY) expiry, as printed on the card.
+public struct ExpiryDate: Sendable, Equatable {
+    public let month: Int  // 1-12
+    public let year: Int   // 4-digit, e.g. 2029
+}
+
 /// A PAN held in a wipeable, fixed-size, heap-pinned buffer.
 ///
 /// PCI-DSS design:
@@ -29,14 +35,27 @@ public final class SecurePAN: @unchecked Sendable {
     public let brand: CardBrand
     /// Last four digits (safe to display under PCI-DSS 3.4 truncation rules).
     public let last4: String
+    /// Best-effort expiry, extracted from the same OCR text as the PAN.
+    /// `nil` when no MM/YY pattern was found -- see `FintechCore.extractExpiry`
+    /// for the accuracy caveat (no checksum to validate against, unlike the PAN).
+    public let expiry: ExpiryDate?
+    /// Best-effort cardholder name, extracted from the same OCR text as the
+    /// PAN. Markedly less reliable than `expiry` or the PAN itself -- see
+    /// `FintechCore.extractCardholderName`. Not PCI-DSS sensitive on its own
+    /// (a name alone isn't cardholder data), so it's a plain `String`, not
+    /// wiped alongside the PAN digits.
+    public let cardholderName: String?
 
-    init(digits: UnsafeBufferPointer<CChar>, count: Int, brand: CardBrand) {
+    init(digits: UnsafeBufferPointer<CChar>, count: Int, brand: CardBrand,
+         expiry: ExpiryDate? = nil, cardholderName: String? = nil) {
         storage = UnsafeMutablePointer<UInt8>.allocate(capacity: capacity)
         storage.initialize(repeating: 0, count: capacity)
         let n = min(count, capacity - 1, digits.count)
         for i in 0..<n { storage[i] = UInt8(bitPattern: digits[i]) }
         self.count = n
         self.brand = brand
+        self.expiry = expiry
+        self.cardholderName = cardholderName
         last4 = n >= 4
             ? String(decoding: UnsafeBufferPointer(start: storage + (n - 4), count: 4),
                      as: UTF8.self)

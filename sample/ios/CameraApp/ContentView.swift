@@ -28,8 +28,10 @@ final class ScannerViewModel: NSObject, ObservableObject, CameraScannerPipelineD
         // Called on the main queue; `pan` is wiped as soon as this method
         // returns. A real integration would hand the digits to its
         // tokenizer/HSM call synchronously, right here, instead of just
-        // reading brand/last4 for display.
-        let text = "Card: \(pan.brand) ****\(pan.last4)"
+        // reading brand/last4/expiry/cardholderName for display.
+        var text = "Card: \(pan.brand) ****\(pan.last4)"
+        if let expiry = pan.expiry { text += " exp \(expiry.month)/\(expiry.year)" }
+        if let name = pan.cardholderName { text += " (\(name))" }
         Task { @MainActor in self.statusText = text }
     }
 

@@ -48,6 +48,72 @@ public class FintechCoreWrapperTests
     }
 
     [Fact]
+    public void ExtractExpiryParsesAndRejectsInvalidMonths()
+    {
+        ExpiryDate? expiry = FintechCoreWrapper.ExtractExpiry("VALID THRU 12/29");
+        Assert.Equal(12, expiry?.Month);
+        Assert.Equal(2029, expiry?.Year);
+        Assert.Null(FintechCoreWrapper.ExtractExpiry("4111111111111111"));
+        Assert.Null(FintechCoreWrapper.ExtractExpiry("13/45"));  // Invalid month is skipped, not returned.
+    }
+
+    [Fact]
+    public void ExtractCardholderNameFiltersBrandWords()
+    {
+        Assert.Equal("JOHN DOE",
+            FintechCoreWrapper.ExtractCardholderName("BANK OF AEGIS\n4111111111111111\nJOHN DOE"));
+        Assert.Null(FintechCoreWrapper.ExtractCardholderName("VISA PLATINUM\n4111111111111111"));
+    }
+
+    [Fact]
+    public void ExtractCardDetailsAttachesExpiryAndName()
+    {
+        using SecurePan? pan = FintechCoreWrapper.ExtractCardDetails(
+            "BANK OF AEGIS\n4111 1111 1111 1111\nVALID THRU 12/29\nJOHN DOE");
+        Assert.NotNull(pan);
+        Assert.True(pan!.UseDigits(d => d.SequenceEqual("4111111111111111")));
+        Assert.Equal(12, pan.Expiry?.Month);
+        Assert.Equal(2029, pan.Expiry?.Year);
+        Assert.Equal("JOHN DOE", pan.CardholderName);
+    }
+
+    [Fact]
+    public void ExtractMrzParsesValidTd3PassportSpecimen()
+    {
+        // ICAO Doc 9303 worked example ("ERIKSSON ANNA MARIA"), the standard
+        // specimen used industry-wide for this purpose, not a real document.
+        MrzResult? mrz = FintechCoreWrapper.ExtractMrz(
+            "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<\n" +
+            "L898902C36UTO7408122F1204159ZE184226B<<<<<10");
+        Assert.NotNull(mrz);
+        Assert.Equal("L898902C3", mrz!.DocumentNumber);
+        Assert.Equal("UTO", mrz.Nationality);
+        Assert.Equal("740812", mrz.DateOfBirth);
+        Assert.Equal("120415", mrz.ExpiryDate);
+        Assert.Equal('F', mrz.Sex);
+        Assert.Equal("ERIKSSON", mrz.Surname);
+        Assert.Equal("ANNA MARIA", mrz.GivenNames);
+        Assert.True(mrz.DocumentNumberCheckValid);
+        Assert.True(mrz.DateOfBirthCheckValid);
+        Assert.True(mrz.ExpiryCheckValid);
+        Assert.True(mrz.CompositeCheckValid);
+    }
+
+    [Fact]
+    public void ExtractMrzDetectsCorruptedCheckDigitAndRejectsNonMrz()
+    {
+        MrzResult? corrupted = FintechCoreWrapper.ExtractMrz(
+            "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<\n" +
+            "L898902C36UTO7408122F1204159ZE184226B<<<<<11");
+        Assert.NotNull(corrupted);
+        Assert.True(corrupted!.DocumentNumberCheckValid); // Unaffected field.
+        Assert.False(corrupted.CompositeCheckValid);
+
+        Assert.Null(FintechCoreWrapper.ExtractMrz("JUST SOME ORDINARY TEXT"));
+        Assert.Null(FintechCoreWrapper.ExtractMrz(""));
+    }
+
+    [Fact]
     public void AnalyzeLumaIsZeroCopyAndDefensive()
     {
         byte[] frame = Enumerable.Repeat((byte)128, 640 * 480).ToArray();

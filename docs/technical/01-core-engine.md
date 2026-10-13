@@ -63,6 +63,32 @@ deterministically. Every platform binding mirrors this as `SecurePAN`
 (Swift), `SecurePan` (Kotlin/Java/C#), or a transferred `Uint8Array`
 (TypeScript) — see [Security & PCI-DSS](07-security-pci-dss.md).
 
+### Expiry and cardholder name
+
+```cpp
+std::optional<ExpiryDate> extract_expiry(std::string_view raw_ocr);
+std::optional<std::string> extract_cardholder_name(std::string_view raw_ocr);
+```
+
+Both are best-effort, scanned from the same raw OCR text as the PAN, but
+neither has a checksum to validate against the way `Validate` backs the
+PAN — a transaction reference that happens to look like `12/29`, or an
+unrelated all-caps line, can't be told apart from the real thing with
+certainty. That also means neither is PCI-DSS cardholder data on its own,
+so unlike `CardNumber` they aren't wiped — every platform's combined
+extraction (`extractCardDetails` / `extractCardDetails` / `ExtractCardDetails`)
+attaches them to the same wipeable PAN type as plain, unwiped fields.
+
+- **`extract_expiry`** scans for the first `MM/YY` or `MM/YYYY` pattern
+  (OCR-repairing the digits around the `/` the same way PAN extraction
+  does), validates the month is `01`–`12`, and returns the first match in
+  reading order.
+- **`extract_cardholder_name`** returns the longest line that's all
+  uppercase letters/spaces, has 2+ words, and doesn't match a small
+  blocklist of brand/product words (`VISA`, `GOLD`, `VALID`, `THRU`, …) —
+  "looks like a name and isn't a known non-name word" is the only signal
+  available.
+
 ## SpatialMatcher
 
 ```cpp
@@ -129,7 +155,7 @@ before spending inference time on it.
 
 ## C ABI surface (`fintech_core_c.h`)
 
-Every binding above ultimately calls these nine functions:
+Every binding above ultimately calls these functions:
 
 ```c
 const char* aegis_version(void);
@@ -140,6 +166,11 @@ int32_t aegis_extract_pan(const char* raw_ocr, int32_t raw_len,
 int32_t aegis_extract_pan_utf16(const char16_t* raw_ocr, int32_t raw_len,
                                  char16_t* out_digits, int32_t out_capacity,
                                  int32_t* out_len, int32_t* out_brand);
+int32_t aegis_extract_expiry(const char* raw_ocr, int32_t raw_len,
+                              aegis_expiry* out_expiry);
+int32_t aegis_extract_cardholder_name(const char* raw_ocr, int32_t raw_len,
+                                        char* out_name, int32_t out_capacity,
+                                        int32_t* out_len);
 int32_t aegis_analyze_luma(const uint8_t* data, int64_t data_len,
                             int32_t width, int32_t height, int32_t row_stride,
                             aegis_frame_metrics* out_metrics);
