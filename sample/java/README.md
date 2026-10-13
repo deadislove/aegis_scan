@@ -72,6 +72,17 @@ Opens this Mac's webcam directly and loops: capture a frame, run OCR, run
 barcode decoding, feed the result through `FintechCoreInterop.extractPan`.
 Press Ctrl+C to stop.
 
+**Known issue**: barcode detection works in this mode, but card number
+detection has not been reliably reproduced — the same physical card that
+`sample/csharp`'s `--camera` mode detects correctly can fail to detect
+here. The underlying `extractPan`/Luhn logic is identical on both
+platforms and is covered by the same passing test suite (see
+`bindings/java/src/test/java/.../InteropTest.java`), so this looks like
+an OCR-accuracy issue specific to this CLI capture path rather than a
+logic bug, but it has not been root-caused. If you hit this, the .NET
+sample's `--camera` mode (`sample/csharp/`) is the more reliable CLI
+reference for live-camera testing on this platform family.
+
 Like the .NET sample, this doesn't reimplement OCR/barcode decoding in
 Java — it shells out to the same three CLI tools:
 

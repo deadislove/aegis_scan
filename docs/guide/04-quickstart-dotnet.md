@@ -50,7 +50,26 @@ using SecurePan? details = FintechCoreWrapper.ExtractCardDetails(ocrText);
 Console.WriteLine($"{details?.Expiry} {details?.CardholderName}");  // e.g. ExpiryDate { Month = 12, Year = 2029 } JOHN DOE
 ```
 
-## 4. Voucher matching
+## 4. ID document scanning (MRZ)
+
+A separate capability from card scanning — parses a passport or ID card's
+machine-readable zone:
+
+```csharp
+MrzResult? mrz = FintechCoreWrapper.ExtractMrz(ocrText);
+if (mrz is not null)
+{
+    Console.WriteLine($"{mrz.DocumentNumber} {mrz.Surname} {mrz.GivenNames}");
+    if (mrz.CompositeCheckValid) Console.WriteLine("MRZ checksum passed");
+}
+```
+
+Unlike expiry/cardholder name, every MRZ field is backed by an ICAO 9303
+check digit — see `docs/technical/01-core-engine.md`'s MRZ section. It's
+PII, not PCI-DSS cardholder data, so it's a different compliance
+consideration than the card fields above.
+
+## 5. Voucher matching
 
 ```csharp
 using var wrapper = new FintechCoreWrapper(frameWidth: 1080, frameHeight: 1920);

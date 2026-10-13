@@ -79,6 +79,27 @@ if (details) {
 }
 ```
 
+## 5. ID document scanning (MRZ)
+
+A separate capability from card scanning — parses a passport or ID card's
+machine-readable zone, not something `FintechWebScanner` detects
+automatically:
+
+```ts
+import { extractMrz } from '@aegisscan/web';
+
+const mrz = extractMrz(ocrText);
+if (mrz) {
+  console.log(mrz.documentNumber, mrz.surname, mrz.givenNames);
+  if (mrz.compositeCheckValid) console.log('MRZ checksum passed');
+}
+```
+
+Unlike expiry/cardholder name, every MRZ field is backed by an ICAO 9303
+check digit — see `docs/technical/01-core-engine.md`'s MRZ section. It's
+PII, not PCI-DSS cardholder data, so it's a different compliance
+consideration than the card fields above.
+
 ## Tuning
 
 `detectCards`, `detectVouchers`, `maxFps` (default 30),

@@ -33,11 +33,18 @@ reason.
   pinned once, and handed to `aegis_matcher_match` as an array of
   `AegisItem` structs pointing into that arena — one pin/unpin per call, not
   one per string.
-- `ExtractExpiry`/`ExtractCardholderName`: unlike `ExtractPan`, there's no
-  UTF-16 native entry point for these, so the span is transcoded to UTF-8
-  (`Encoding.UTF8.GetBytes`, `stackalloc` below 512 bytes) before crossing
-  the boundary. `ExtractCardDetails` runs all three extractions over the
-  same OCR text in one call and attaches the results to one `SecurePan`.
+- `ExtractExpiry`/`ExtractCardholderName`/`ExtractMrz`: unlike `ExtractPan`,
+  there's no UTF-16 native entry point for these, so the span is
+  transcoded to UTF-8 (`Encoding.UTF8.GetBytes`, `stackalloc` below 512
+  bytes) before crossing the boundary. `ExtractCardDetails` runs the first
+  two over the same OCR text in one call and attaches the results to one
+  `SecurePan`. `ExtractMrz` returns a separate `MrzResult` record
+  (`Mrz.cs`) — a TD1/TD3 machine-readable zone parse (passport/ID card
+  back, ICAO Doc 9303), not a card field, so it isn't folded into
+  `ExtractCardDetails`. The native `AegisMrzNative` struct uses C#
+  `fixed`-size byte buffers (`unsafe struct`) to mirror `aegis_mrz`'s
+  layout exactly, including the padding the C compiler inserts before the
+  trailing `int` fields.
 
 ## `SpatialMatcherHandle : SafeHandle`
 

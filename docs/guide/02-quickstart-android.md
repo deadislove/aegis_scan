@@ -68,6 +68,25 @@ LuhnValidator.extractCardDetails(ocrText)?.use { pan ->
 `LuhnValidator`/`SpatialMatcher` live in `aegisscan-core`, a plain
 Kotlin/JVM module — no Android dependency, usable in a backend service too.
 
+## 4. ID document scanning (MRZ)
+
+A separate capability from card scanning — parses a passport or ID card's
+machine-readable zone, not something `AndroidCameraScannerEngine` detects
+automatically:
+
+```kotlin
+MrzParser.extractMrz(ocrText)?.let { mrz ->
+    println("${mrz.documentNumber} ${mrz.surname} ${mrz.givenNames}")
+    if (mrz.compositeCheckValid) println("MRZ checksum passed")
+}
+```
+
+Unlike expiry/cardholder name, every MRZ field is backed by an ICAO 9303
+check digit — see `docs/technical/01-core-engine.md`'s MRZ section. It's
+PII, not PCI-DSS cardholder data, so it's a different compliance
+consideration than the card fields above. `MrzParser` also lives in the
+plain `aegisscan-core` module.
+
 ## Tuning
 
 `ScannerConfig(detectCards, detectVouchers, requiredConsecutiveCardHits,

@@ -39,7 +39,7 @@ ImageBitmap (transferred, 0-copy)
   → BarcodeDetector (native) on the ImageBitmap directly
       ↘ WASM/JS fallback on OffscreenCanvas ImageData if unsupported
   → OCR stage (pluggable module) on OffscreenCanvas ImageData
-  → extractCard (Luhn + repair) + SpatialMatcher
+  → extractCardDetails (Luhn + repair + expiry + name) + SpatialMatcher
   → structured result posted back; the PAN travels in a transferred buffer
 ```
 
@@ -59,6 +59,28 @@ copy crossing the thread boundary), the native `BarcodeDetector` runs
 directly on it (no canvas needed), and the `OffscreenCanvas` backing store
 is only touched (and only allocated once, reused/resized after) when OCR or
 the barcode fallback actually need raw pixels.
+
+## Card details: expiry, cardholder name, and MRZ
+
+`web/src/core/luhn.ts` exports `extractExpiry`/`extractCardholderName`
+alongside `extractCard` — best-effort, scanned from the same OCR text as
+the PAN, with no checksum backing them the way Luhn backs the PAN.
+`extractCardDetails` runs all three in one pass and attaches
+`expiry`/`cardholderName` to the returned `ExtractedPan`; the worker calls
+this instead of `extractCard`, so `onCard`'s payload (`CardScan` in
+`FintechWebScanner.ts`) carries `expiry`/`cardholderName` automatically
+when they're found. Neither is wiped by `wipe()` — see
+[Security & PCI-DSS](07-security-pci-dss.md) section 6 for why.
+
+`web/src/core/mrz.ts` exports `extractMrz`, parsing a TD1/TD3
+machine-readable zone (passport/ID card back) per ICAO Doc 9303 — same
+bit-for-bit algorithm as the C++ core's `extract_mrz`, see
+[Core Engine](01-core-engine.md)'s MRZ section for the check-digit story.
+Unlike expiry/cardholder name, every MRZ field **is** checksum-backed;
+`MrzResult`'s `*CheckValid` fields say which to trust. It's PII, not
+PCI-DSS cardholder data, and the worker does not call it automatically —
+MRZ scanning is a different document-capture flow than card scanning, so
+a caller invokes `extractMrz` directly on OCR text it already has.
 
 ## Wire protocol (`protocol.ts`)
 

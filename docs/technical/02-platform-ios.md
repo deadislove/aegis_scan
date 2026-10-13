@@ -66,11 +66,19 @@ FintechCore.validateLuhn(_ digits: String) -> Bool
 FintechCore.extractPAN(from rawOCR: String) -> SecurePAN?
 FintechCore.extractExpiry(from rawOCR: String) -> ExpiryDate?
 FintechCore.extractCardholderName(from rawOCR: String) -> String?
+FintechCore.extractMRZ(from rawOCR: String) -> MrzResult?
 ```
 
 Thin wrappers over the C ABI (`aegis_luhn_validate`, `aegis_extract_pan`,
-`aegis_extract_expiry`, `aegis_extract_cardholder_name` — the last two are
-UTF-8 only; there's no UTF-16 native entry point for them).
+`aegis_extract_expiry`, `aegis_extract_cardholder_name`,
+`aegis_extract_mrz` — the last three are UTF-8 only; there's no UTF-16
+native entry point for them). `MrzResult` (in `Mrz.swift`) parses a TD1/
+TD3 machine-readable zone (passport/ID card back) per ICAO Doc 9303 —
+see [Core Engine](01-core-engine.md)'s MRZ section for the check-digit
+story. It's PII, not PCI-DSS cardholder data, and is a standalone call —
+`CameraScannerPipeline` does not call it automatically the way it does
+`extractExpiry`/`extractCardholderName`, since MRZ scanning is a
+different document-capture flow than card scanning.
 `VoucherMatcher` (same file, `FintechCore.swift`) owns an
 `aegis_matcher_t*` handle, freed in `deinit`; it is **not** safe for
 concurrent use, which is why the pipeline keeps exactly one instance per

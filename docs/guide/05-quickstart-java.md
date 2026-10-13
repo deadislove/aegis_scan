@@ -54,6 +54,27 @@ try (FintechCoreJni jni = new FintechCoreJni(0, 0)) {
 }
 ```
 
+## 4. ID document scanning (MRZ)
+
+A separate capability from card scanning — parses a passport or ID
+card's machine-readable zone. Both options return the same `MrzResult`
+type:
+
+```java
+import com.aegisscan.interop.MrzResult;
+
+MrzResult mrz = core.extractMrz(ocrText);   // FFM; jni.extractMrz(...) works the same way
+if (mrz != null) {
+    System.out.println(mrz.documentNumber() + " " + mrz.surname() + " " + mrz.givenNames());
+    if (mrz.compositeCheckValid()) System.out.println("MRZ checksum passed");
+}
+```
+
+Unlike expiry/cardholder name, every MRZ field is backed by an ICAO 9303
+check digit — see `docs/technical/01-core-engine.md`'s MRZ section. It's
+PII, not PCI-DSS cardholder data, so it's a different compliance
+consideration than the card fields above.
+
 ## Must-not-do
 
 - Don't pass a heap `ByteBuffer` to `analyzeLuma` — both options require a

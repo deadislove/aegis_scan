@@ -29,6 +29,14 @@ three extractions over one OCR pass and attaches the results to one
 `extractCard` so `ScanEvent.CardDetected.pan.expiry`/`.cardholderName` are
 populated automatically.
 
+`MrzParser.extractMrz` (`Mrz.kt`, same `aegisscan-core` module) parses a
+TD1/TD3 machine-readable zone (passport/ID card back) per ICAO Doc
+9303 — same bit-for-bit algorithm as the C++ core's `extract_mrz`, see
+[Core Engine](01-core-engine.md)'s MRZ section for the check-digit story.
+It's PII, not PCI-DSS cardholder data, and is a standalone call —
+`AndroidCameraScannerEngine` does not call it automatically, since MRZ
+scanning is a different document-capture flow than card scanning.
+
 ## `AndroidCameraScannerEngine`
 
 Implements `ImageAnalysis.Analyzer`. Two-layer back-pressure:

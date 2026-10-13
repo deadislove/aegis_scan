@@ -89,6 +89,40 @@ attaches them to the same wipeable PAN type as plain, unwiped fields.
   "looks like a name and isn't a known non-name word" is the only signal
   available.
 
+### MRZ (ID document scanning)
+
+```cpp
+std::optional<MrzResult> extract_mrz(std::string_view raw_ocr);
+```
+
+Scans raw OCR text for a TD3 (passport, 2 lines × 44 chars) or TD1 (ID
+card, 3 lines × 30 chars) MRZ block and parses it per ICAO Doc 9303 — the
+standard machine-readable zone on the back of a passport or national ID.
+Unlike expiry/cardholder name, every field here **is** backed by a
+checksum: each of the document number, date of birth, and expiry fields
+carries its own ICAO check digit, and a composite check digit covers all
+of them (plus the personal-number field, for a TD3 passport) at once —
+the same mental model as Luhn backing a PAN. `MrzResult`'s
+`documentNumberCheckValid`/`dateOfBirthCheckValid`/`expiryCheckValid`/
+`compositeCheckValid` fields tell you which parsed fields to trust; a
+caller that only wants a validated MRZ should check
+`compositeCheckValid` before using any of them.
+
+`extract_mrz` returns `std::nullopt` only when no MRZ-shaped line run is
+found at all (i.e. this text has no MRZ in it). When a run is found but
+its check digits fail — a damaged or heavily misread document — the
+fields are still returned with their `*CheckValid` flags false, so the
+caller decides whether a not-quite-matching MRZ is still worth surfacing
+rather than the extractor silently discarding it.
+
+MRZ parsing is **not PCI-DSS cardholder data** — it's PII (name, date of
+birth, document number), a different compliance surface entirely. See
+[Security & PCI-DSS](07-security-pci-dss.md) for what that means for
+retention. This is also a newer, more narrowly-scoped feature than PAN
+extraction: it covers the MRZ itself, not the free-form printed fields on
+a driver's license or ID card front (which have no standard layout to
+parse against).
+
 ## SpatialMatcher
 
 ```cpp
@@ -171,6 +205,8 @@ int32_t aegis_extract_expiry(const char* raw_ocr, int32_t raw_len,
 int32_t aegis_extract_cardholder_name(const char* raw_ocr, int32_t raw_len,
                                         char* out_name, int32_t out_capacity,
                                         int32_t* out_len);
+int32_t aegis_extract_mrz(const char* raw_ocr, int32_t raw_len,
+                           aegis_mrz* out_mrz);
 int32_t aegis_analyze_luma(const uint8_t* data, int64_t data_len,
                             int32_t width, int32_t height, int32_t row_stride,
                             aegis_frame_metrics* out_metrics);

@@ -87,7 +87,24 @@ become sensitive in combination with the PAN — which is wiped — so don't
 independently cache or log `cardholderName` alongside a PAN you captured
 earlier in the same session.
 
-## 7. What this SDK does NOT do for you
+## 7. MRZ parsing is PII, not PCI-DSS scope — a different compliance surface
+
+`extract_mrz`/`extractMRZ`/`extractMrz` (ID document scanning — see
+[Core Engine](01-core-engine.md)'s MRZ section) parses a passport or ID
+card's machine-readable zone: name, date of birth, document number,
+nationality. None of this is PCI-DSS cardholder data — it's personal
+data under GDPR/CCPA-style PII regimes instead, a genuinely different
+compliance frame, not more of the same one PAN handling already covers.
+`MrzResult` is a plain, unwiped type on every platform (same reasoning as
+expiry/cardholder name in section 6): this SDK still applies its usual
+zero-disk/zero-log discipline to every field, but **does not** decide
+retention policy for you the way it implicitly does for a PAN (which it
+never holds past one callback). A KYC flow's natural shape often wants to
+persist extracted identity data somewhere downstream — that's a decision
+for your application, not this SDK, and your own PII-handling/retention
+policy governs it, not anything documented here.
+
+## 8. What this SDK does NOT do for you
 
 AegisScan performs capture, OCR repair, Luhn validation, and brand
 detection — it does not tokenize, encrypt, transmit, or store the PAN for

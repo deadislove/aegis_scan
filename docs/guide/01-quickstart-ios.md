@@ -63,6 +63,26 @@ if let name = FintechCore.extractCardholderName(from: ocrText) {
 }
 ```
 
+## 5. ID document scanning (MRZ)
+
+A separate capability from card scanning — parses a passport or ID card's
+machine-readable zone (back of the document), not something
+`CameraScannerPipeline` detects automatically:
+
+```swift
+if let mrz = FintechCore.extractMRZ(from: ocrText) {
+    print(mrz.documentNumber, mrz.surname, mrz.givenNames)
+    if mrz.compositeCheckValid {
+        print("MRZ checksum passed — fields are trustworthy")
+    }
+}
+```
+
+Unlike expiry/cardholder name, every MRZ field is backed by an ICAO 9303
+check digit — see `docs/technical/01-core-engine.md`'s MRZ section. It's
+PII, not PCI-DSS cardholder data, so it's a different compliance
+consideration than the card fields above.
+
 ## Tuning
 
 `pipeline.configuration` (`ScannerConfiguration`) — toggle
