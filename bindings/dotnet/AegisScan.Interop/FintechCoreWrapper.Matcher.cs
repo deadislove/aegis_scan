@@ -49,19 +49,33 @@ public sealed partial class FintechCoreWrapper
                     bool isBarcode = i < barcodes.Count;
                     string s = isBarcode ? barcodes[i].Payload : texts[i - barcodes.Count].Text;
                     int n = Encoding.UTF8.GetBytes(s, arena.AsSpan(offset));
-                    // Validate the exact value used in the pointer arithmetic
-                    // immediately below, not just the buffer's overall size
-                    // earlier -- this is the bound CodeQL's
-                    // cs/unvalidated-local-pointer-arithmetic query wants
-                    // checked right before a rented (virtual-call-derived)
-                    // buffer is used in `basePtr + offset`.
-                    if (offset < 0 || offset > arena.Length - n)
+                    // &arena[offset] (ldelema) is a bounds-checked array-element
+                    // address -- the runtime throws IndexOutOfRangeException if
+                    // offset is invalid, unlike `basePtr + offset`, which is raw
+                    // pointer arithmetic with no check at all. This is what
+                    // CodeQL's cs/unvalidated-local-pointer-arithmetic actually
+                    // flags: the `+` operator on a pointer derived from a virtual
+                    // call (ArrayPool<T>.Rent), not merely the absence of a
+                    // nearby `if`. The nested `fixed` is only syntax (C# requires
+                    // `&arr[i]` as a fixed-statement initializer, CS0212); the
+                    // outer `basePtr` fixed above already pins `arena` for this
+                    // whole method, so the resulting pointer stays valid past
+                    // this block. n == 0 needs no address into arena at all
+                    // (TextLen 0 means native code never reads through it), so
+                    // it routes to the plain base pointer instead of indexing
+                    // one-past-the-end.
+                    byte* elementPtr;
+                    if (n > 0)
                     {
-                        throw new InvalidOperationException("Computed offset is outside the rented arena.");
+                        fixed (byte* p = &arena[offset]) { elementPtr = p; }
+                    }
+                    else
+                    {
+                        elementPtr = basePtr;
                     }
                     items[i] = new AegisItem
                     {
-                        Text = basePtr + offset,
+                        Text = elementPtr,
                         TextLen = n,
                         Box = isBarcode ? barcodes[i].Box : texts[i - barcodes.Count].Box,
                     };
