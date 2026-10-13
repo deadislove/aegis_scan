@@ -30,6 +30,15 @@ public sealed partial class FintechCoreWrapper
         var output = new AegisMatch[Math.Min(barcodes.Count, texts.Count)];
         try
         {
+            // ArrayPool<T>.Rent is virtual; its "at least N bytes" contract
+            // isn't visible to static analysis, so the pointer arithmetic
+            // below on a too-small buffer would read/write out of bounds.
+            // Validate explicitly rather than trusting the call result.
+            if (arena.Length < total)
+            {
+                throw new InvalidOperationException(
+                    $"ArrayPool<byte>.Shared.Rent returned {arena.Length} bytes, less than the {total} requested.");
+            }
             fixed (byte* basePtr = arena)
             fixed (AegisItem* itemPtr = items)
             fixed (AegisMatch* outPtr = output)
