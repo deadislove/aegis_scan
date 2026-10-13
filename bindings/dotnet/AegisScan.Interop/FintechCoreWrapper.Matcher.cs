@@ -49,6 +49,16 @@ public sealed partial class FintechCoreWrapper
                     bool isBarcode = i < barcodes.Count;
                     string s = isBarcode ? barcodes[i].Payload : texts[i - barcodes.Count].Text;
                     int n = Encoding.UTF8.GetBytes(s, arena.AsSpan(offset));
+                    // Validate the exact value used in the pointer arithmetic
+                    // immediately below, not just the buffer's overall size
+                    // earlier -- this is the bound CodeQL's
+                    // cs/unvalidated-local-pointer-arithmetic query wants
+                    // checked right before a rented (virtual-call-derived)
+                    // buffer is used in `basePtr + offset`.
+                    if (offset < 0 || offset > arena.Length - n)
+                    {
+                        throw new InvalidOperationException("Computed offset is outside the rented arena.");
+                    }
                     items[i] = new AegisItem
                     {
                         Text = basePtr + offset,
